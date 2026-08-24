@@ -137,3 +137,17 @@ class TestConceptPlateMinKline:
         data = plate_fetcher.get_concept_plate_min_kline(TEST_PLATE, freq=freq, count=-3)
         assert data is not None and len(data) > 0
         assert "time" in data[-1] and data[-1]["close"] > 0
+
+
+class TestConceptPlateTrend:
+    """G6：板块分时（2026-08-24 实测网关支持，market=44）。"""
+
+    def test_intraday_trend(self, plate_fetcher):
+        """板块分时（当日）：pre_market + trading 两段（2026-08-24 实测 TrendOp 241 点）。"""
+        data = plate_fetcher.get_concept_plate_trend(TEST_PLATE)
+        assert data is not None
+        assert "market_date" in data and "pre_market" in data and "trading" in data
+
+    def test_history_trend(self, plate_fetcher):
+        data = plate_fetcher.get_concept_plate_trend(TEST_PLATE, date="20260821")
+        assert data is not None and data["trading"]

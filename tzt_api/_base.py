@@ -10,6 +10,9 @@
     fetch_trade_calendar / get_stock_info
   - 分钟K共享实现 _fetch_kline_series（v2.0.0 自 MinKLineFetcher 上移，
     供个股分钟K与板块分钟K复用）
+  - 分时共享实现 _fetch_trend_raw 及 _build_trend_params / _convert_trend_time /
+    _parse_call_trend / _parse_trend_op（v2.0.0 自 TrendFetcher 上移，
+    供个股分时与板块分时复用）
 
 分钟K线公开方法见 tzt_api.min_kline.MinKLineFetcher，
 概念板块方法见 tzt_api.concept_plate.ConceptPlateFetcher。
@@ -432,3 +435,120 @@ class KLineFetcher:
                 unique_data.append(d)
 
         return unique_data
+
+    # ===== 分时共享实现（TrendFetcher / ConceptPlateFetcher 复用）=====
+
+    def _build_trend_params(self, code: str, date: int, daycount: int, market: Optional[int] = None) -> Dict:
+        """构造分时数据请求参数"""
+        if market is None:
+            market = self.infer_market(code)
+
+        numeric_code = self._numeric_code(code)
+
+        params = {
+            "Action": 10001,
+            "code": numeric_code,
+            "market": market,
+            "trendtypes": -1,
+            "date": date,
+            "daycount": daycount,
+            "421.date": date,
+            "421.daycount": daycount,
+            "422.date": date,
+            "422.daycount": daycount,
+            "423.date": date,
+            "423.daycount": daycount,
+        }
+
+        return params
+
+    def _convert_trend_time(self, time_raw: int) -> Dict[str, str]:
+        """转换时间戳为日期和时间"""
+        time_str = str(time_raw).zfill(14)
+        if len(time_str) != 14:
+            return {"date": "", "time": ""}
+        date = f"{time_str[0:4]}-{time_str[4:6]}-{time_str[6:8]}"
+        time = f"{time_str[8:10]}:{time_str[10:12]}:{time_str[12:14]}"
+        return {"date": date, "time": time}
+
+    def _parse_call_trend(self, data_list: list) -> List[Dict]:
+        """解析盘前数据（CallTrend）"""
+        result = []
+        for item in data_list:
+            if not isinstance(item, dict):
+                continue
+            dt = self._convert_trend_time(item.get("Time", 0))
+            if not dt["date"]:
+                continue
+
+            row = {
+                "date": dt["date"],
+                "time": dt["time"],
+                "ref_price": self._convert_price(item.get("RefPrice", 0)),
+                "matched_vol": self._convert_volume(item.get("MatchedVol", 0)),
+                "non_matched_vol_buy": self._convert_volume(item.get("NonMatchedVolBuy", 0)),
+                "non_matched_vol_sell": self._convert_volume(item.get("NonMatchedVolSell", 0)),
+                "phase": "pre-market",
+            }
+            result.append(row)
+        return result
+
+    def _parse_trend_op(self, data_list: list) -> List[Dict]:
+        """解析盘中数据（TrendOp）"""
+        result = []
+        for item in data_list:
+            if not isinstance(item, dict):
+                continue
+            dt = self._convert_trend_time(item.get("Time", 0))
+            if not dt["date"]:
+                continue
+
+            row = {
+                "date": dt["date"],
+                "time": dt["time"],
+                "last_price": self._convert_price(item.get("LastPrice", 0)),
+                "avg_price": self._convert_price(item.get("AvgPrice", 0)),
+                "volume": self._convert_volume(item.get("Volume", 0)),
+                "turnover": self._convert_turnover(item.get("Turnover", 0)),
+                "phase": "trading",
+            }
+            result.append(row)
+        return result
+
+    def _fetch_trend_raw(self, code: str, date: int, daycount: int, market: Optional[int] = None, label: str = "") -> Optional[Dict[str, List[Dict]]]:
+        """分时请求与响应解析的统一实现（当日/历史共用）。
+
+        原 TrendFetcher._fetch_trend 实现体（v2.0.0 上移基类供板块分时复用）：
+        Action=10001 请求、ErrorNo 检查、CallTrend/TrendOp 两段解析。
+        """
+        params = self._build_trend_params(code, date=date, daycount=daycount, market=market)
+        self.logger.info(f"Fetching trend: code={code}, label={label}, market={params['market']}")
+
+        raw = self._request(params)
+        if raw is None:
+            return None
+
+        error_no = raw.get("ErrorNo")
+        if error_no and str(error_no) != "0":
+            self.logger.warning(f"API error: {raw.get('ErrorMessage', 'unknown')}")
+            return None
+
+        result = {
+            "market_date": raw.get("marketdate", ""),
+            "pre_market": [],
+            "trading": [],
+        }
+
+        call_trend = raw.get("CallTrend")
+        if call_trend and isinstance(call_trend, list) and len(call_trend) > 0:
+            result["pre_market"] = self._parse_call_trend(call_trend[0])
+
+        trend_op = raw.get("TrendOp")
+        if trend_op and isinstance(trend_op, list) and len(trend_op) > 0:
+            result["trading"] = self._parse_trend_op(trend_op[0])
+
+        if not result["pre_market"] and not result["trading"]:
+            self.logger.warning(f"Empty trend data for code={code}, label={label}")
+            return None
+
+        return result

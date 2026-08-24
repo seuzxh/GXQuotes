@@ -28,6 +28,7 @@ class ConceptPlateFetcher(KLineFetcher):
       - get_all_concept_plates：获取所有概念板块列表（自动翻页，全量）
       - get_concept_plate_kline：获取指定板块的日K线
       - get_concept_plate_min_kline：获取板块指数分钟K线（v2.0.0 新增，G6）
+      - get_concept_plate_trend：获取板块指数分时（v2.0.0 新增，G6）
       - get_concept_plate_stocks：获取板块成份股（单页，含板块自身）
       - iter_concept_plate_stocks：生成器，自动翻页产出全部成份股（过滤板块自身）
       - get_stock_concept_plates：获取股票所属的概念板块
@@ -193,6 +194,13 @@ class ConceptPlateFetcher(KLineFetcher):
         """
         return self._fetch_kline_series(plate_code, freq=freq, count=count,
                                         market=44, pages=pages)
+
+    def get_concept_plate_trend(self, plate_code: str, date: Optional[str] = None) -> Optional[Dict]:
+        """获取板块分时（v2.0.0 新增，G6；market=44，date=None 当日 / "YYYYMMDD" 历史）。"""
+        date_int = 0 if date in (None, "0") else int(date)
+        daycount = 0 if date_int == 0 else 1
+        return self._fetch_trend_raw(plate_code, date=date_int, daycount=daycount,
+                                     market=44, label=f"plate {plate_code}")
 
     def get_concept_plate_stocks(self, plate_code: str, start: int = 0, count: int = 10) -> Optional[List[Dict]]:
         """获取指定概念板块的成份股列表（单页，含板块自身）。
