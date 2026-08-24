@@ -43,6 +43,9 @@ class TestTztApiStructure:
         for m in ["is_index", "get_index_info"]:
             assert not hasattr(KLineFetcher, m), f"v2 已删除 {m}"
         assert hasattr(MinKLineFetcher, "fetch_min_kline")
+        assert not hasattr(KLineFetcher, "get_concept_plate_min_kline")
+        assert hasattr(ConceptPlateFetcher, "get_concept_plate_min_kline")
+        assert hasattr(KLineFetcher, "_fetch_kline_series")   # 私有共享实现上移基类
         assert hasattr(ConceptPlateFetcher, "get_all_concept_plates")
         assert hasattr(ConceptPlateFetcher, "iter_concept_plate_stocks"), \
             "ConceptPlateFetcher 缺 v1.1.0 新增的 iter_concept_plate_stocks"

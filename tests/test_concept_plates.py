@@ -127,3 +127,13 @@ class TestStockConceptPlates:
         concepts = plate_fetcher.get_stock_concept_plates(TEST_STOCK, TEST_MARKET, plate_type="concept")
         assert concepts
         assert all(p["type"] == "concept" for p in concepts)
+
+
+class TestConceptPlateMinKline:
+    """G6：板块分钟行情（2026-08-24 实测网关支持）。"""
+
+    @pytest.mark.parametrize("freq", ["1min", "5min", "15min", "30min", "60min"])
+    def test_min_kline_all_freqs(self, plate_fetcher, freq):
+        data = plate_fetcher.get_concept_plate_min_kline(TEST_PLATE, freq=freq, count=-3)
+        assert data is not None and len(data) > 0
+        assert "time" in data[-1] and data[-1]["close"] > 0

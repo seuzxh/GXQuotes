@@ -8,8 +8,10 @@
     字段单位换算 / K线解析
   - 日K线获取方法：fetch_day_kline / fetch_day_kline_with_factor /
     fetch_trade_calendar / get_stock_info
+  - 分钟K共享实现 _fetch_kline_series（v2.0.0 自 MinKLineFetcher 上移，
+    供个股分钟K与板块分钟K复用）
 
-分钟K线方法见 tzt_api.min_kline.MinKLineFetcher，
+分钟K线公开方法见 tzt_api.min_kline.MinKLineFetcher，
 概念板块方法见 tzt_api.concept_plate.ConceptPlateFetcher。
 """
 
@@ -364,3 +366,69 @@ class KLineFetcher:
             "name": stock_name,
             "market_sn": market_sn,
         }
+
+    # ===== 分钟K共享实现（MinKLineFetcher / ConceptPlateFetcher 复用）=====
+
+    def _fetch_kline_series(self, code: str, freq: str = "1min", count: Optional[int] = None,
+                            market: Optional[int] = None, pages: int = 1,
+                            adjust: Optional[str] = None) -> Optional[List[Dict]]:
+        """按 freq 获取K线序列（分钟频率 + locator 翻页 + 去重排序）。
+
+        原 MinKLineFetcher.fetch_min_kline 实现体（v2.0.0 上移基类供板块复用）：
+        freq→klinetype 校验、count 覆盖、单页/locator 翻页、时间键去重升序排序。
+        """
+        klinetype = KLINE_TYPE_MAP.get(freq)
+        if klinetype is None:
+            self.logger.error(f"Unsupported freq: {freq}")
+            return None
+
+        params = self._build_params(code, klinetype, market, adjust=adjust)
+        if count is not None:
+            params[f"{klinetype}.count"] = -abs(count)
+
+        if pages <= 1:
+            self.logger.info(f"Fetching {freq} kline: code={code}, market={params['market']}, count={params.get(f'{klinetype}.count')}")
+            raw = self._request(params)
+            items = self._extract_kline_list(raw, klinetype, label=f"code={code}")
+            if items is None:
+                return None
+            return self._parse_kline_items(items, klinetype)
+
+        all_data = []
+        locator = None
+
+        for page in range(pages):
+            page_params = dict(params)
+            if locator is not None:
+                page_params[f"{klinetype}.locator"] = locator
+
+            self.logger.info(f"Fetching {freq} kline page {page + 1}/{pages}: code={code}, market={page_params['market']}, count={page_params.get(f'{klinetype}.count')}")
+            raw = self._request(page_params)
+            items = self._extract_kline_list(raw, klinetype, label=f"code={code} at page {page + 1}")
+            if items is None:
+                self.logger.info(f"Stopping {freq} pagination at page {page + 1} (no data)")
+                break
+
+            parsed = self._parse_kline_items(items, klinetype)
+            if not parsed:
+                break
+            all_data.extend(parsed)
+
+            locator_val = raw.get(f"{klinetype}.locator")
+            if isinstance(locator_val, list) and len(locator_val) > 0 and isinstance(locator_val[0], list) and len(locator_val[0]) > 0:
+                locator = locator_val[0][0]
+            else:
+                break
+
+        if not all_data:
+            return None
+
+        seen = set()
+        unique_data = []
+        for d in sorted(all_data, key=lambda x: f"{x.get('date','')} {x.get('time','')}"):
+            key = f"{d.get('date','')} {d.get('time','')}"
+            if key not in seen:
+                seen.add(key)
+                unique_data.append(d)
+
+        return unique_data

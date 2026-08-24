@@ -179,3 +179,19 @@ class TestConceptPlateFetcher:
         """ConceptPlateFetcher 继承基类的日K方法。"""
         data = plate_fetcher.fetch_day_kline(TEST_CODE, count=-1, market=TEST_MARKET, adjust="none")
         assert data is not None and len(data) > 0
+
+    def test_plate_min_kline_unit(self, monkeypatch):
+        """板块分钟K走 market=44 通道（mock _request 断言参数）。"""
+        from tzt_api import ConceptPlateFetcher
+        fetcher = ConceptPlateFetcher()
+        captured = {}
+        def fake(params):
+            captured.update(params)
+            return {"Min5KLine": [[{"Time": 20260824150000, "OpenPrice": 1796000000,
+                                    "HighPrice": 1800000000, "LowPrice": 1790000000,
+                                    "ClosePrice": 1796130000, "PeriodVolume": 100,
+                                    "PeriodTurnover": 200}]]}
+        monkeypatch.setattr(fetcher, "_request", fake)
+        data = fetcher.get_concept_plate_min_kline("994612", freq="5min", count=-3)
+        assert captured["market"] == 44 and captured["klinetype"] == "502"
+        assert data and data[-1]["close"] == 1796.13

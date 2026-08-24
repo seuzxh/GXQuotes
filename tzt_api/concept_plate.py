@@ -27,6 +27,7 @@ class ConceptPlateFetcher(KLineFetcher):
     提供中焯行情 API 的概念板块相关接口封装：
       - get_all_concept_plates：获取所有概念板块列表（自动翻页，全量）
       - get_concept_plate_kline：获取指定板块的日K线
+      - get_concept_plate_min_kline：获取板块指数分钟K线（v2.0.0 新增，G6）
       - get_concept_plate_stocks：获取板块成份股（单页，含板块自身）
       - iter_concept_plate_stocks：生成器，自动翻页产出全部成份股（过滤板块自身）
       - get_stock_concept_plates：获取股票所属的概念板块
@@ -174,6 +175,24 @@ class ConceptPlateFetcher(KLineFetcher):
         if items is None:
             return None
         return self._parse_kline_items(items, klinetype)
+
+    def get_concept_plate_min_kline(self, plate_code: str, freq: str = "5min",
+                                    count: Optional[int] = None, pages: int = 1) -> Optional[List[Dict]]:
+        """获取板块指数分钟K线（v2.0.0 新增，G6；2026-08-24 实测 market=44 可用）。
+
+        参数:
+            plate_code (str): 概念板块代码，例如 "994612"
+            freq (str, optional): 分钟频率 1min/5min/15min/30min/60min，默认 "5min"。
+            count (int, optional): K线数量，负值表示从最新数据向前获取（同个股分钟K）。
+            pages (int, optional): locator 翻页页数，默认 1（语义同 fetch_min_kline）。
+
+        返回值:
+            Optional[List[Dict]]: 分钟K线列表，字段与个股分钟K一致
+            （date/time/open/high/low/close/volume/amount，单位已换算）。
+            请求失败或无数据返回 None。
+        """
+        return self._fetch_kline_series(plate_code, freq=freq, count=count,
+                                        market=44, pages=pages)
 
     def get_concept_plate_stocks(self, plate_code: str, start: int = 0, count: int = 10) -> Optional[List[Dict]]:
         """获取指定概念板块的成份股列表（单页，含板块自身）。
