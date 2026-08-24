@@ -60,7 +60,7 @@ class TestInferMarketExplicitPrefix:
 
 
 class TestInferMarketSegments:
-    """裸码个股段位直判（2026-08-24 10032 全段实测标定）。"""
+    """裸码个股段位直判（2026-08-24/25 10032 实测标定）。"""
 
     @pytest.mark.parametrize("code", ["600000", "601318", "603259", "605499",
                                       "688981", "689009", "900948"])
@@ -71,9 +71,9 @@ class TestInferMarketSegments:
     def test_sz_segments(self, code):
         assert infer_market(code) == 0
 
-    @pytest.mark.parametrize("code", ["830799", "430047", "870357", "920002", "899050"])
+    @pytest.mark.parametrize("code", ["920001", "920002", "920100"])
     def test_bj_segments(self, code):
-        assert infer_market(code) == 103          # 899050 北证50："8" 规则恰好覆盖
+        assert infer_market(code) == 103          # 920=北交所现行码段（2026 切换后）
 
 
 class TestAmbiguous:
@@ -87,11 +87,20 @@ class TestAmbiguous:
 
 
 class TestUnknown:
-    @pytest.mark.parametrize("code", ["200002", "932000", "930050", "123456", "5"])
+    @pytest.mark.parametrize("code", ["200002", "932000", "930050", "921000",
+                                      "830799", "870357", "430047", "899050",
+                                      "123456", "5"])
     def test_unknown_raises(self, code):
-        """未知段位 fail-fast（200 深B 网关无数据；93x 中证需显式前缀）。"""
+        """未知段位 fail-fast（200 深B 网关无数据；93x 中证需显式前缀；
+        83/43/87 北交所旧码已切换 920 段；899 北证指数需 bj 前缀；921-929 未分配）。"""
         with pytest.raises(UnknownCodeError):
             infer_market(code)
+
+    def test_legacy_bse_hint(self):
+        """北交所旧码的错误消息含 920 切换指引（2026-08-25 实测标签「已切换」）。"""
+        with pytest.raises(UnknownCodeError) as ei:
+            infer_market("830799")
+        assert "920" in str(ei.value)
 
 
 class TestV2Removals:
@@ -150,7 +159,8 @@ MARKET_TO_PREFIX = {1: "sh", 0: "sz", 103: "bj"}
 # 个股段位规则（前缀匹配，全部 10032 实测标定，见设计存档 §1.4）
 SH_SEGMENTS = ("600", "601", "603", "605", "688", "689", "900")  # 900=沪B
 SZ_SEGMENTS = ("001", "002", "003", "300", "301")
-BJ_SEGMENTS = ("8", "4", "92")  # 覆盖 830/430/870/920/899（899 北证指数同市场）
+BJ_SEGMENTS = ("920",)  # 北交所现行码段（2026 由 83/43/87 切换而来；921-929 未分配）
+LEGACY_BSE_PREFIXES = ("8", "4")  # 旧北交所码（网关标签「已切换」，别名仍可取数）
 
 # 歧义段：深市个股与沪市指数真实共存（实测 11 样本 7 双候选），静态不可分
 AMBIGUOUS_SEGMENTS = ("000",)
@@ -182,12 +192,13 @@ def infer_market(code: str) -> int:
     判断顺序：
       1. 显式前缀 sh/sz/bj → 对应市场（个股/指数通用）
       2. 个股段位：600/601/603/605/688/689/900→沪；001/002/003/300/301→深；
-         8/4/92→北
+         920→北（北交所现行码段，2026 由 83/43/87 切换而来）
       3. 000xxx → AmbiguousCodeError（消息含 sz/sh 行动指引）
-      4. 其余 → UnknownCodeError
+      4. 其余 → UnknownCodeError（8/4 开头的北交所旧码给 920 切换指引）
 
-    ⚠️ v2 破坏性变更：指数裸码（含 399xxx/93xxxx/000xxx）不再推断，
-    请用显式前缀（sz399001 / sh932000 / sh000300）或显式传 market。
+    ⚠️ v2 破坏性变更：指数裸码（含 399xxx/93xxxx/000xxx）与北交所旧码
+    （83/43/87，已切换至 920 段）不再推断——请用显式前缀
+    （sz399001 / sh932000 / sh000300）、920 新码，或显式传 market。
     """
     upper = code.upper()
     if upper.startswith("SH"):
@@ -209,6 +220,12 @@ def infer_market(code: str) -> int:
         return MARKET_CODE_MAP["sz"]
     if numeric.startswith(BJ_SEGMENTS):
         return MARKET_CODE_MAP["bj"]
+    if numeric.startswith(LEGACY_BSE_PREFIXES):
+        raise UnknownCodeError(
+            f"{code} 为北交所旧码（已切换至 920 段）或新三板代码："
+            f"请改用 920 新码（可用 SecurityResolver 查询），"
+            f"或显式传 market=103 使用旧码别名"
+        )
     raise UnknownCodeError(
         f"{code} 属未知段位，无法推断市场；请使用 sh/sz/bj 前缀或显式传 market"
     )
@@ -236,7 +253,7 @@ git commit -m "refactor!: market v2——零指数知识段位规则 + Ambiguous
 ```
 
 **测试标准（Task 1 验收）:**
-- `python -m pytest tests/test_market.py -q` → 全过（显式前缀 6 例、段位 17 例、歧义 10 例、未知 5 例、删除断言、映射表）
+- `python -m pytest tests/test_market.py -q` → 全过（显式前缀 6 例、段位 15 例、歧义 10 例、未知 10 例 + 旧码提示 1 例、删除断言、映射表）
 - `python -c "from tzt_api import AmbiguousCodeError, UnknownCodeError, MarketResolutionError"` 成功
 - `python -c "from tzt_api.market import infer_market; infer_market('000001')"` 抛 `AmbiguousCodeError` 且消息同时含 "sz000001" 与 "sh000001"
 
