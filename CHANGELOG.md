@@ -21,6 +21,7 @@
 - 测试：新增 `tests/conftest.py`（集成跳过条件单点化 + session 级共享 fixtures）；重写 `test_concept_plates.py`（unittest→pytest，删 sys.path hack 与 kline-fetcher 残留注释，新增全量分页/单位自洽/生成器深度用例）；新增 `test_transport.py`（16 项：共享限流/重试/异常/base_url 优先级）；与 `test_split_interfaces.py` 重叠用例去重
 - 文档：目录重组为 `docs/requirements`（需求）/ `docs/API`（接口文档）/ `docs/guide`（指南）三级 + `docs/README.md` 索引；新增 [docs/requirements/行情Skill需求.md](docs/requirements/行情Skill需求.md)（项目目标、FR/NFR、差距分析对齐 v1.1.0、M1 完成 / M2 待启动）
 - 需求评审（2026-08-24 第二轮）：需求文档升至 v0.3——**FR3 标的解析契约 v2 定稿**（删除指数白名单、库层零指数知识、个股与指数共用交易所前缀命名空间、段位规则 10032 全段实测标定、000xxx/未知段位抛 `AmbiguousCodeError`/`UnknownCodeError`）、**FR6 定稿 10032 意图路由**（SecurityResolver，兼解决中文名/拼音反查）、N6 改写为 v2.0.0 破坏性变更；设计存档见 `docs/plans/2026-08-24-market-v2-and-routing-design.md`（M2 实施依据）
+- 需求落定（2026-08-24 第三轮，v0.4）：待确认问题全部关闭——Q1 定为 **agent skill 形态**（排除 MCP/CLI）、Q3 **板块分钟行情纳入 FR5**（网关实测支持：板块 1/5/15min K 与分时 TrendOp 241 点，market=44 通道复用，M2 薄封装）、Q4 分时**按需拉取**（不做轮询/订阅）
 
 ## [1.0.0] - 2026-08-23
 
