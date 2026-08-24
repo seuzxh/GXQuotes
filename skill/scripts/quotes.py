@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""行情 Skill 执行入口：agent 经 SKILL.md 调用，stdout 输出 JSON。
+
+退出码：0 成功 | 2 未找到标的（或网关无数据）| 3 歧义（stdout 打印候选）| 4 网关/配置/网络错误
+子命令：
+  resolve     <标的词> [--prefer index|stock]             标的解析（6位代码/中文名/拼音首字母）
+  dayk        <代码> [--count N | --begin/--end] [--adjust qfq|hfq|none] [--factor]
+  mink        <代码> --freq 1min|5min|15min|30min|60min [--count N] [--pages N]
+  trend       <代码> [--date YYYYMMDD]                    分时（缺省当日）
+  plates      <代码> [--type concept|industry|region]     个股所属板块
+  members     <板块代码> [--all]                          板块成份股（默认前 50）
+  platek      <板块代码> [--freq ...]                     板块日K（缺省）/分钟K（给 --freq）
+  platetrend  <板块代码> [--date YYYYMMDD]                板块分时（缺省当日）
+依赖：tzt-api v2.0.0（pip install -e 本仓库，或仓库内直跑），KLINE_API_BASE_URL 环境变量。
+"""
+import argparse
+import json
+import os
+import re
+import sys
+
+# 仓库内直跑支持：skill/scripts/ → 仓库根（tzt_api 所在处）
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+if os.path.isdir(os.path.join(_REPO_ROOT, "tzt_api")) and _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+try:
+    from tzt_api import (
+        AmbiguousCodeError,
+        ConceptPlateFetcher,
+        KLineFetcher,
+        MarketResolutionError,
+        MinKLineFetcher,
+        SecurityResolver,
+        TrendFetcher,
+        TZTAPIError,
+        TZTConnectionError,
+        TZTError,
+        UnknownCodeError,
+    )
+    from tzt_api.market import MARKET_TO_PREFIX
+except ImportError:  # 环境缺依赖：给出可操作的指引而非 traceback
+    print(json.dumps({"error": {
+        "kind": "dependency",
+        "message": "无法导入 tzt-api 库",
+        "actionable": "请在 GXQuotes 仓库内运行本脚本（自动加入 sys.path），或先 pip install -e <仓库路径>",
+    }}, ensure_ascii=False, indent=2))
+    sys.exit(4)
+
+# 退出码语义（与 SKILL.md 退出码表一致）
+EXIT_OK = 0
+EXIT_NOT_FOUND = 2
+EXIT_AMBIGUOUS = 3
+EXIT_ERROR = 4
+
+AMBIGUOUS_HINT = "多个候选，请指定"
+DAY_KLINE_DEFAULT_COUNT = -120   # 按需拉取：日K缺省约半年
+MIN_KLINE_DEFAULT_COUNT = -240   # 按需拉取：分钟K缺省约一个交易日（1min 口径）
+MEMBERS_DEFAULT_COUNT = 50       # members 缺省前 50 只（--all 全量）
+
+# 显式市场前缀（sh/sz/bj 后跟数字；个股与指数共用命名空间，v2 契约）
+_EXPLICIT_PREFIX_RE = re.compile(r"^(?:sh|sz|bj)\d", re.IGNORECASE)
+
+
+class _ScriptExit(Exception):
+    """携带退出码终止脚本（emit_* 系列统一出口）。"""
+
+    def __init__(self, code: int):
+        super().__init__(code)
+        self.code = code
+
+
+# ===== 输出契约（全部走 stdout，ensure_ascii=False + indent=2）=====
+
+def _dump(payload: dict):
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def emit_ok(data, meta=None):
+    """成功：{"data": ..., "meta": {"count": N}}，exit 0。"""
+    if meta is None:
+        if isinstance(data, list):
+            meta = {"count": len(data)}
+        elif isinstance(data, dict) and "trading" in data:
+            meta = {"count": len(data.get("trading") or []),
+                    "pre_market_count": len(data.get("pre_market") or [])}
+        elif isinstance(data, dict):
+            meta = {"count": 1}
+        else:
+            meta = {"count": 1 if data else 0}
+    _dump({"data": data, "meta": meta})
+    raise _ScriptExit(EXIT_OK)
+
+
+def emit_ambiguous(candidates):
+    """歧义：{"candidates": [...], "hint": "多个候选，请指定"}，exit 3。"""
+    _dump({"candidates": candidates, "hint": AMBIGUOUS_HINT})
+    raise _ScriptExit(EXIT_AMBIGUOUS)
+
+
+def emit_error(kind, message, actionable=None, code=EXIT_ERROR):
+    """错误：{"error": {"kind", "message", "actionable"}}，exit code。"""
+    err = {"kind": kind, "message": message}
+    if actionable:
+        err["actionable"] = actionable
+    _dump({"error": err})
+    raise _ScriptExit(code)
+
+
+# ===== 标的解析（显式前缀优先 / 裸码歧义自动复析反问 / 板块代码直传）=====
+
+def _resolver_route(result: dict) -> dict:
+    """把 SecurityResolver.resolve 的结果路由为输出；仅 unique 返回 chosen。"""
+    status = result.get("status")
+    if status == "unique":
+        return result["chosen"]
+    if status == "ambiguous":
+        emit_ambiguous(result.get("candidates") or [])
+    if status == "not_found":
+        emit_error("not_found", f"未找到标的: {result.get('term', '')}",
+                   actionable="请确认代码/名称/拼音后重试，可先用 resolve 子命令查询",
+                   code=EXIT_NOT_FOUND)
+    emit_error("resolver", f"标的解析失败: {result.get('error', 'unknown')}",
+               actionable="检查 KLINE_API_BASE_URL 与网络后重试")
+
+
+def _run_for_code(code: str, fetch_fn, resolver: SecurityResolver):
+    """执行 fetch_fn(code, market=None)；裸码 Ambiguous/Unknown 时经 resolver 复析。
+
+    显式前缀（sh/sz/bj）直接调用不复析；裸码异常时自动复析：
+    unique → 用 chosen 的 code+market（映射为显式前缀）重试一次；
+    ambiguous → exit 3 打印候选；not_found → exit 2；error → exit 4。
+    """
+    try:
+        return fetch_fn(code)
+    except (AmbiguousCodeError, UnknownCodeError):
+        if _EXPLICIT_PREFIX_RE.match(code):
+            raise  # 显式前缀不应触发市场解析异常，防御性上抛（main 兜底 exit 4）
+        chosen = _resolver_route(resolver.resolve(code))
+        chosen_code = str(chosen.get("code", code))
+        market = chosen.get("market")
+        if market in MARKET_TO_PREFIX:
+            retry_code, retry_market = MARKET_TO_PREFIX[market] + chosen_code, None
+        else:
+            retry_code, retry_market = chosen_code, market
+        try:
+            return fetch_fn(retry_code, market=retry_market)
+        except (AmbiguousCodeError, UnknownCodeError) as e:
+            emit_error("market", str(e),
+                       actionable=f"resolver 候选 {chosen_code}(market={market}) 无法取数，"
+                                  f"请用 sh/sz/bj 显式前缀重试")
+
+
+def _require_data(data, label: str):
+    """strict fetcher 下 None = 网关正常响应但无数据（如代码不存在），折叠为 exit 2。"""
+    if data is None:
+        emit_error("not_found", f"网关未返回{label}数据（代码可能不存在或该标的无此类行情）",
+                   actionable="确认代码正确（指数/深市 000xxx 请带 sh/sz 前缀）后重试",
+                   code=EXIT_NOT_FOUND)
+    return data
+
+
+# ===== 子命令实现 =====
+
+def cmd_resolve(args):
+    result = SecurityResolver().resolve(args.term, prefer=args.prefer)
+    if result.get("status") == "unique":
+        emit_ok({"term": result["term"], "status": "unique",
+                 "chosen": result["chosen"], "candidates": result["candidates"]},
+                meta={"count": len(result["candidates"]) or 1})
+    _resolver_route(result)  # ambiguous / not_found / error → emit + 对应退出码
+
+
+def cmd_dayk(args):
+    kf, resolver = KLineFetcher(strict=True), SecurityResolver()
+    use_range = args.begin is not None or args.end is not None
+    count = None if use_range else (args.count if args.count is not None else DAY_KLINE_DEFAULT_COUNT)
+
+    def fetch(code, market=None):
+        if args.factor:
+            return kf.fetch_day_kline_with_factor(code, count=count, market=market,
+                                                  begindate=args.begin, enddate=args.end)
+        return kf.fetch_day_kline(code, count=count, market=market,
+                                  begindate=args.begin, enddate=args.end, adjust=args.adjust)
+
+    emit_ok(_require_data(_run_for_code(args.code, fetch, resolver), "日K"))
+
+
+def cmd_mink(args):
+    mf, resolver = MinKLineFetcher(strict=True), SecurityResolver()
+    count = args.count if args.count is not None else MIN_KLINE_DEFAULT_COUNT
+
+    def fetch(code, market=None):
+        return mf.fetch_min_kline(code, freq=args.freq, count=count, market=market, pages=args.pages)
+
+    emit_ok(_require_data(_run_for_code(args.code, fetch, resolver), "分钟K"))
+
+
+def cmd_trend(args):
+    tf, resolver = TrendFetcher(strict=True), SecurityResolver()
+
+    def fetch(code, market=None):
+        return tf.fetch_trend(code, date=args.date, market=market)
+
+    emit_ok(_require_data(_run_for_code(args.code, fetch, resolver), "分时"))
+
+
+def cmd_plates(args):
+    pf, resolver = ConceptPlateFetcher(strict=True), SecurityResolver()
+
+    def fetch(code, market=None):
+        return pf.get_stock_concept_plates(code, market=market, plate_type=args.type)
+
+    emit_ok(_require_data(_run_for_code(args.code, fetch, resolver), "板块归属"))
+
+
+def cmd_members(args):
+    pf = ConceptPlateFetcher(strict=True)
+    if args.all:
+        data = list(pf.iter_concept_plate_stocks(args.plate))
+    else:
+        # 多取 1 只补回 block.include=1 造成的板块自身占位，过滤后截断到 50
+        rows = pf.get_concept_plate_stocks(args.plate, start=0,
+                                           count=MEMBERS_DEFAULT_COUNT + 1) or []
+        data = [r for r in rows if str(r.get("market")) != "44"][:MEMBERS_DEFAULT_COUNT]
+    emit_ok(data)
+
+
+def cmd_platek(args):
+    pf = ConceptPlateFetcher(strict=True)
+    if args.freq:
+        count = args.count if args.count is not None else MIN_KLINE_DEFAULT_COUNT
+        data = pf.get_concept_plate_min_kline(args.plate, freq=args.freq,
+                                              count=count, pages=args.pages)
+        label = "板块分钟K"
+    else:
+        count = args.count if args.count is not None else DAY_KLINE_DEFAULT_COUNT
+        data = pf.get_concept_plate_kline(args.plate, count=count)
+        label = "板块日K"
+    emit_ok(_require_data(data, label))
+
+
+def cmd_platetrend(args):
+    pf = ConceptPlateFetcher(strict=True)
+    emit_ok(_require_data(pf.get_concept_plate_trend(args.plate, date=args.date), "板块分时"))
+
+
+# ===== argparse =====
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="quotes.py",
+        description="行情 Skill 执行入口（gxquotes）：stdout 输出 JSON，退出码 0/2/3/4。",
+        epilog="示例：python skill/scripts/quotes.py dayk sh600519 --count -3 --adjust none")
+    sub = parser.add_subparsers(dest="command", metavar="<子命令>", required=True)
+
+    p = sub.add_parser("resolve", help="标的解析：6位代码/中文名/拼音首字母 → 候选与路由结论")
+    p.add_argument("term", help="标的词，如 000300 / 贵州茅台 / 拼音缩写")
+    p.add_argument("--prefer", choices=("index", "stock"), help="意图提示：多候选时仅保留指数/个股")
+    p.set_defaults(func=cmd_resolve)
+
+    p = sub.add_parser("dayk", help="日K线（--factor 附带复权因子）")
+    p.add_argument("code", help="证券代码：sh600519 / sz000001 / 裸码（歧义自动复析）")
+    p.add_argument("--count", type=int, default=None, metavar="N",
+                   help=f"K线根数（负数=最近N根，默认 {DAY_KLINE_DEFAULT_COUNT}）")
+    p.add_argument("--begin", metavar="YYYYMMDD", help="开始日期（与 --end 同用，优先于 --count）")
+    p.add_argument("--end", metavar="YYYYMMDD", help="结束日期")
+    p.add_argument("--adjust", choices=("qfq", "hfq", "none"),
+                   help="复权方式（缺省沿用网关默认 cqtype）")
+    p.add_argument("--factor", action="store_true",
+                   help="附带复权因子（后复权÷不复权逐根计算；忽略 --adjust）")
+    p.set_defaults(func=cmd_dayk)
+
+    p = sub.add_parser("mink", help="分钟K线（1/5/15/30/60min）")
+    p.add_argument("code", help="证券代码：sz399001 / sh600519 / 裸码（歧义自动复析）")
+    p.add_argument("--freq", required=True,
+                   choices=("1min", "5min", "15min", "30min", "60min"), help="分钟频率")
+    p.add_argument("--count", type=int, default=None, metavar="N",
+                   help=f"K线根数（默认 {MIN_KLINE_DEFAULT_COUNT}）")
+    p.add_argument("--pages", type=int, default=1, help="locator 翻页页数（默认 1）")
+    p.set_defaults(func=cmd_mink)
+
+    p = sub.add_parser("trend", help="分时（当日/历史）")
+    p.add_argument("code", help="证券代码：sh600519 / 裸码（歧义自动复析）")
+    p.add_argument("--date", metavar="YYYYMMDD", help="历史日期（缺省当日）")
+    p.set_defaults(func=cmd_trend)
+
+    p = sub.add_parser("plates", help="个股所属概念/行业/地域板块")
+    p.add_argument("code", help="证券代码：sh600519 / 裸码（歧义自动复析）")
+    p.add_argument("--type", choices=("concept", "industry", "region"),
+                   help="板块类型过滤（缺省返回全部并带 type 字段）")
+    p.set_defaults(func=cmd_plates)
+
+    p = sub.add_parser("members", help="板块成份股（默认前 50，--all 全量）")
+    p.add_argument("plate", help="板块代码，如 994612（直传网关，不做标的解析）")
+    p.add_argument("--all", action="store_true", help="自动翻页拉取全部成份股")
+    p.set_defaults(func=cmd_members)
+
+    p = sub.add_parser("platek", help="板块指数K线（缺省日K；给 --freq 则分钟K）")
+    p.add_argument("plate", help="板块代码，如 994612（直传网关，不做标的解析）")
+    p.add_argument("--freq", choices=("1min", "5min", "15min", "30min", "60min"),
+                   help="给则为分钟K，缺省日K")
+    p.add_argument("--count", type=int, default=None, metavar="N",
+                   help=f"K线根数（默认 日K {DAY_KLINE_DEFAULT_COUNT} / 分钟K {MIN_KLINE_DEFAULT_COUNT}）")
+    p.add_argument("--pages", type=int, default=1, help="分钟K翻页页数（默认 1）")
+    p.set_defaults(func=cmd_platek)
+
+    p = sub.add_parser("platetrend", help="板块指数分时（当日/历史）")
+    p.add_argument("plate", help="板块代码，如 994612（直传网关，不做标的解析）")
+    p.add_argument("--date", metavar="YYYYMMDD", help="历史日期（缺省当日）")
+    p.set_defaults(func=cmd_platetrend)
+
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        try:
+            args.func(args)
+        except EnvironmentError as e:  # 库层未配置 KLINE_API_BASE_URL 时抛出（含原始指引）
+            emit_error("config", f"行情网关地址未配置（KLINE_API_BASE_URL）: {e}",
+                       actionable='请先 export KLINE_API_BASE_URL="http://<网关地址>"'
+                                  "（或配置 tzt_api/config/kline_config.yaml 的 api.base_url）后重试")
+        except TZTConnectionError as e:
+            emit_error("network", str(e), actionable="检查网络连通性与 KLINE_API_BASE_URL 后重试")
+        except TZTAPIError as e:
+            emit_error("gateway", str(e), actionable="检查代码/参数后重试（ErrorNo 见 message）")
+        except TZTError as e:
+            emit_error("gateway", str(e))
+        except MarketResolutionError as e:
+            emit_error("market", str(e),
+                       actionable="请使用 sh/sz/bj 显式前缀（如 sz000001 / sh000300 / bj899050）")
+        return EXIT_OK
+    except _ScriptExit as e:  # emit_* 的统一出口（成功/歧义/未找到/错误）
+        return e.code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
