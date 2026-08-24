@@ -47,6 +47,11 @@ class TZTAPIError(TZTError):
         self.error_no = error_no
 
 
+# 确定性业务错误：重试不可能成功，fail-fast（2026-08-24 实测观察：
+# -2300 证券/参数错误族、-989903 未知功能、-200608/-206008 搜索无结果）
+NON_RETRYABLE_ERROR_NOS = {"-2300", "-989903", "-200608", "-206008"}
+
+
 class TZTClient:
     """行情网关传输客户端（会话 + 限流 + 重试）。
 
@@ -89,8 +94,12 @@ class TZTClient:
             )
         return base_url
 
-    def request(self, params: Dict) -> Optional[Dict]:
+    def request(self, params: Dict, accept_error_nos: tuple = ()) -> Optional[Dict]:
         """GET {base_url}/reqxml，带限流与指数退避重试。
+
+        Args:
+            accept_error_nos: 视为**结果状态码**的 ErrorNo 集合（如 10032 的
+                1=命中/2=多条），命中时按成功返回原始响应，不重试不置 last_error。
 
         默认重试穷尽后返回 None 并记录 ``self.last_error``；
         ``strict=True`` 时改为抛出该类型化异常。
@@ -113,11 +122,19 @@ class TZTClient:
 
                 error_no = result.get("ErrorNo")
                 if error_no and str(error_no) != "0":
+                    if str(error_no) in accept_error_nos:
+                        self.last_error = None
+                        return result  # 结果状态码透传（10032）
                     error = TZTAPIError(
                         f"API error: {result.get('ErrorMessage', 'unknown')} (ErrorNo={error_no})",
                         error_no=error_no,
                     )
                     self.last_error = error
+                    if str(error_no) in NON_RETRYABLE_ERROR_NOS:
+                        self.logger.warning(f"{error.message} (不可重试，fail-fast)")
+                        if self.strict:
+                            raise error
+                        return None  # 确定性失败：不重试不退避
                     self.logger.warning(
                         f"{error.message} (attempt {attempt + 1})"
                     )
@@ -131,6 +148,8 @@ class TZTClient:
                 self.last_error = TZTConnectionError(f"Request error: {e}")
                 self.logger.warning(f"Request error: {e} (attempt {attempt + 1})")
                 time.sleep(retry_delay * (2 ** attempt))
+            except TZTError:
+                raise  # 本方法主动抛出的类型化异常（strict 不可重试 fail-fast）不放行为解析错误
             except Exception as e:
                 self.last_error = TZTAPIError(f"Parse error: {e}")
                 self.logger.warning(f"Parse error: {e} (attempt {attempt + 1})")

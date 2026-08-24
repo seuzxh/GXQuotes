@@ -195,3 +195,51 @@ class TestFetcherTransportIntegration:
 
         fetcher = KLineFetcher()
         assert fetcher.last_error is None
+
+
+# ============ 5. 错误分类 + 状态码透传（M2 Task 3 / N2'） ============
+
+class TestErrorClassification:
+    """N2'：不可重试错误 fail-fast；10032 状态码可透传。"""
+
+    def test_non_retryable_error_no_retry(self):
+        """-2300（证券/参数错误）确定性失败：只调 1 次，无退避。"""
+        client = make_client()
+        client.session = FakeSession([{"ErrorNo": "-2300", "ErrorMessage": "证券代码错误"}] * 3)
+        t0 = time.time()
+        result = client.request({"Action": 10002})
+        assert result is None
+        assert len(client.session.calls) == 1          # ← 不重试
+        assert time.time() - t0 < 0.5                  # ← 无退避等待
+        assert isinstance(client.last_error, TZTAPIError)
+
+    def test_non_retryable_strict_raises_fast(self):
+        client = make_client(strict=True)
+        client.session = FakeSession([{"ErrorNo": "-989903", "ErrorMessage": "未知功能"}])
+        with pytest.raises(TZTAPIError):
+            client.request({"Action": "aaa"})
+
+    def test_accept_error_nos_passthrough(self):
+        """10032 的 ErrorNo=1/2 是结果状态码：accept_error_nos 声明后按成功返回。"""
+        client = make_client()
+        payload = {"ErrorNo": "2", "ErrorMessage": "多条", "BinData": "000001|平安银行|"}
+        client.session = FakeSession([payload])
+        result = client.request({"Action": 10032}, accept_error_nos=("1", "2"))
+        assert result == payload
+        assert client.last_error is None
+        assert len(client.session.calls) == 1
+
+    def test_not_found_error_is_non_retryable(self):
+        """搜索无结果（-200608/-206008）确定性失败：不重试，last_error 带 ErrorNo。"""
+        client = make_client()
+        client.session = FakeSession([{"ErrorNo": "-200608", "ErrorMessage": "无结果"}] * 3)
+        assert client.request({"Action": 10032}) is None
+        assert len(client.session.calls) == 1
+        assert str(client.last_error.error_no) == "-200608"
+
+    def test_retryable_error_still_retries(self):
+        """网络错误仍按 max_retries 重试（回归保护）。"""
+        client = make_client()
+        client.session = FakeSession([requests.ConnectionError("x")] * 3)
+        assert client.request({"Action": 10002}) is None
+        assert len(client.session.calls) == 3
