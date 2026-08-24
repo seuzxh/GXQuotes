@@ -1,0 +1,49 @@
+site_name: GXQuotes
+site_description: 中焯行情 3.0 API 的 Python 客户端 —— A股日K / 分钟K / 概念板块 / 分时
+site_url: https://seuzxh.github.io/GXQuotes/
+repo_url: https://github.com/seuzxh/GXQuotes
+repo_name: seuzxh/GXQuotes
+edit_uri: ""
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: 切换至深色模式
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: 切换至浅色模式
+
+# concept_plate_api.md 未列入 nav：仓库内多份文档仍互相链接，
+# 该文件被移除时（不进 nav）构建不会失败，链接仅降级为警告。
+nav:
+  - 首页: index.md
+  - 需求: requirements/行情Skill需求.md
+  - API 文档:
+      - 接口功能清单: API/接口功能清单.md
+      - 中焯官方文档:
+          - 官方资料导航: API/中焯官方文档/README.md
+          - 市场序号列表: API/中焯官方文档/市场序号列表_v1.28.md
+          - 市场类型说明: API/中焯官方文档/行情3.0市场类型说明_v1.22.md
+          - 股票属性ID: API/中焯官方文档/行情3.0股票属性ID_v1.229.md
+      - 概念板块抓包记录: API/概念板块请求API.md
+  - 使用指南:
+      - tztapi-agent: guide/tztapi-agent.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
