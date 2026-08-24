@@ -314,8 +314,8 @@ class ConceptPlateFetcher(KLineFetcher):
         用 900/923 的结果给 901 的板块标注类型。
 
         参数:
-            code (str): 股票代码，例如 "600519"。裸码按指数优先规则推断市场，
-                深市 000xxx 个股请用 "sz000001" 或显式传 market。
+            code (str): 股票代码，例如 "600519"。按 v2 契约推断市场（显式前缀 >
+                个股段位 > 抛异常），裸码 000xxx 歧义请用 "sz000001" 或显式传 market。
             market (int, optional): 市场代码，0深圳 1上海 103北京。默认自动推断。
             plate_type (str, optional): 板块类型过滤，可选 "industry"（行业）/
                 "region"（地域）/"concept"（概念及风格）。默认 None 返回全部并带 type 字段。
