@@ -1,17 +1,19 @@
 # 概念板块接口文档
 
 > 实现位置：`tzt-api/tzt_api/concept_plate.py`（`ConceptPlateFetcher`；兼容壳 `kline_fetcher.concept_plate` 仍可用）
-> 原始抓包参数：[docs/API/概念板块请求API.md](API/概念板块请求API.md)（iOS 客户端抓取，部分参数冗余）
+> 原始抓包参数：[概念板块请求API.md](概念板块请求API.md)（iOS 客户端抓取，部分参数冗余）
 > 本文所有结论基于 **2026-08-22 真实 API 实测**。
 
 ## 接口总览
 
 | # | 方法 | Action | 用途 | 实测状态 |
 |---|------|--------|------|---------|
-| 1 | `get_all_concept_plates()` | 10007 | 概念板块列表 | ✅ 可用，**仅返回前 30 个**（共 390 个，需自行翻页，见 1.4） |
+| 1 | `get_all_concept_plates(limit=None)` | 10007 | 概念板块列表 | ✅ v1.1.0 起**自动翻页全量**（约 390 个，见 1.4）；v1.0.x 仅前 30 |
 | 2 | `get_concept_plate_kline(plate_code, count, market)` | 10002 | 板块日K线 | ✅ 可用 |
-| 3 | `get_concept_plate_stocks(plate_code, start, count)` | 10005 | 板块成份股 | ✅ 可用，**返回首项为板块自身**（见 3.3） |
+| 3 | `get_concept_plate_stocks(plate_code, start, count)` | 10005 | 板块成份股 | ✅ 可用，**返回首项为板块自身**（见 3.3）；另有 `iter_concept_plate_stocks()` 生成器（v1.1.0，自动翻页全量并剔除板块自身） |
 | 4 | `get_stock_concept_plates(code, market, plate_type)` | 10000 | 股票所属板块 | ✅ **已修复可用**（官方属性 900/901/923，见 4.1） |
+
+> v1.1.0 起快照字段（price/change/high/low/change_pct）**已按 §5 统一换算**（元/点/%），不再返回原始整数。
 
 ```python
 from tzt_api import ConceptPlateFetcher
@@ -72,15 +74,15 @@ fetcher.get_all_concept_plates() -> Optional[List[Dict]]
 | `PxChgPct5TD/20TD/60TD/250TD` 等 | 多周期涨跌幅 | ÷1000 |
 | `max` | **板块总数**（实测 390） | — |
 
-### 1.4 ⚠️ 分页限制（重要）
+### 1.4 分页（v1.1.0 起由方法内置）
 
-方法硬编码 `start=0, count=30`，**只返回按涨幅排序的前 30 个板块**。实测确认：
+`get_all_concept_plates(limit=None)` 自动翻页直至短页。网关分页语义（2026-08-24 复测确认）：
 
 - 板块总数 `max = 390`（以响应为准，可能随时间变化）
-- `start` 翻页有效（start=30/360 均返回下一页，start=390 返回空）
+- `start` 翻页有效（start=100 取第二页，与首页无重叠；start 超过总数返回空且无 ErrorNo）
 - **单次 `count` 上限 100**（超过报 `ErrorNo=-2300 请求数量不能超过100`）
 
-获取全部板块需自行分页请求（4 次 × 100）：
+v1.0.x 需自行分页（历史参考）：
 
 ```python
 def get_all_plates_paged(fetcher):
