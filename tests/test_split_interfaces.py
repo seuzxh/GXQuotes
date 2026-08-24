@@ -13,7 +13,7 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-from tzt_api import KLineFetcher
+from tzt_api import KLineFetcher, AmbiguousCodeError
 
 TEST_CODE = "600519"    # 贵州茅台
 TEST_MARKET = 1         # 上海
@@ -52,7 +52,8 @@ class TestKLineFetcherDay:
 
     def test_infer_market_static(self):
         assert KLineFetcher.infer_market("600519") == 1
-        assert KLineFetcher.infer_market("000001") == 1  # 指数优先：上证指数
+        with pytest.raises(AmbiguousCodeError):
+            KLineFetcher.infer_market("000001")  # v2：裸码 000xxx 歧义，fail-fast
         assert KLineFetcher.infer_market("sz000001") == 0  # 显式前缀：平安银行
 
     def test_fetch_day_kline_adjust_qfq(self, day_fetcher):

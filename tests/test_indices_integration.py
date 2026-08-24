@@ -1,77 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""指数行情集成测试：验证 INDEX_CODE_MAP 全部指数可获取（防回归）。
-
-需要网络与中焯行情 API。默认不运行（integration marker），手动触发：
-    KLINE_API_BASE_URL=... pytest tests/test_indices_integration.py -m integration
-"""
+"""指数行情集成测试（v2：显式前缀形式，原白名单参数化已随 INDEX_CODE_MAP 删除）。"""
 import pytest
 
 pytestmark = pytest.mark.integration
 
-from tzt_api import KLineFetcher
-from tzt_api.market import INDEX_CODE_MAP
+from tzt_api import KLineFetcher, MinKLineFetcher, TrendFetcher, AmbiguousCodeError
 
-# 历史分时用最近已知的交易日（周五）；当前日期附近取一个肯定的历史交易日
-HISTORY_TREND_DATE = "20260821"
+# 显式前缀 × 市场 × 名称（v2 契约：指数一律显式前缀，与 qlib SH000300 同构）
+EXPLICIT_INDICES = [
+    ("sh000001", 1, "上证指数"), ("sh000010", 1, "上证180"), ("sh000016", 1, "上证50"),
+    ("sh000300", 1, "沪深300"), ("sh000688", 1, "科创50"), ("sh000852", 1, "中证1000"),
+    ("sh000903", 1, "中证100"), ("sh000905", 1, "中证500"), ("sh000906", 1, "中证800"),
+    ("sh000922", 1, "中证红利"), ("sh932000", 1, "中证2000"),
+    ("sz399001", 0, "深证成指"), ("sz399004", 0, "深证100"), ("sz399006", 0, "创业板指"),
+    ("sz399102", 0, "创业板综"), ("sz399295", 0, "创业板50"), ("sz399303", 0, "国证2000"),
+    ("sz399971", 0, "中证传媒"), ("sz399997", 0, "中证白酒"),
+    ("bj899050", 103, "北证50"),
+]
 
 
-class TestIndexDayKline:
-    """全部白名单指数的日K线（裸码，不传 market，验证指数优先推断）。"""
-
-    @pytest.mark.parametrize("code", sorted(INDEX_CODE_MAP.keys()),
-                             ids=[INDEX_CODE_MAP[c][0] for c in sorted(INDEX_CODE_MAP.keys())])
-    def test_day_kline_bare_code(self, day_fetcher, code):
-        """裸码不传 market → 按指数所属市场推断并返回数据。"""
+class TestExplicitIndexKline:
+    @pytest.mark.parametrize("code,market,name", EXPLICIT_INDICES,
+                             ids=[c[2] for c in EXPLICIT_INDICES])
+    def test_day_kline(self, day_fetcher, code, market, name):
         data = day_fetcher.fetch_day_kline(code, count=-1, adjust="none")
-        assert data is not None and len(data) > 0, f"{code} {INDEX_CODE_MAP[code][0]} 日K线无数据"
+        assert data is not None and len(data) > 0, f"{code} {name} 日K无数据"
 
 
-class TestIndexMarketInference:
-    def test_infer_market_matches_map(self):
-        """全部白名单指数：infer_market 与 INDEX_CODE_MAP 声明的市场一致。"""
-        from tzt_api import KLineFetcher
-        for code, (_, market) in INDEX_CODE_MAP.items():
-            assert KLineFetcher.infer_market(code) == market, f"{code} 市场推断不符"
+class TestV2BareIndexCodes:
+    def test_bare_000_raises_before_request(self, day_fetcher):
+        """裸 000xxx 在参数构造期抛异常——不发请求即失败。"""
+        with pytest.raises(AmbiguousCodeError):
+            day_fetcher.fetch_day_kline("000300", count=-1)
 
-
-
-class TestIndexOtherData:
-    """代表性指数的分钟K / 当日分时 / 历史分时。"""
-
-    def test_min_kline_sh300(self, min_fetcher):
-        data = min_fetcher.fetch_min_kline("000300", freq="5min", count=-3)
-        assert data is not None and len(data) > 0
-
-    def test_min_kline_cyb(self, min_fetcher):
-        data = min_fetcher.fetch_min_kline("399006", freq="1min", count=-3)
-        assert data is not None and len(data) > 0
-
-    def test_intraday_trend_csi1000(self, trend_fetcher):
-        t = trend_fetcher.fetch_intraday_trend("000852")
-        assert t is not None and t.get("trading")
-
-    def test_intraday_trend_bj50(self, trend_fetcher):
-        t = trend_fetcher.fetch_intraday_trend("899050")
-        assert t is not None and t.get("trading")
-
-    def test_history_trend_sh_index(self, trend_fetcher):
-        t = trend_fetcher.fetch_history_trend("000001", date=HISTORY_TREND_DATE)
-        assert t is not None and t.get("trading")
-
-
-class TestAmbiguityRules:
-    """歧义代码解析规则（真实 API 双向验证）。"""
-
-    def test_bare_000001_is_sh_index(self, day_fetcher):
-        """裸码 000001 → 上证指数（指数优先）。"""
-        data = day_fetcher.fetch_day_kline("000001", count=-1, adjust="none")
-        assert data is not None
-        # 上证指数点位在千级以上；深市同名个股（平安银行）股价为个位数~十几元
-        assert data[-1]["close"] > 1000
-
-    def test_sz_prefix_000001_is_stock(self, day_fetcher):
-        """sz000001 → 平安银行（显式前缀优先）。"""
-        data = day_fetcher.fetch_day_kline("sz000001", count=-1, adjust="none")
-        assert data is not None
-        assert data[-1]["close"] < 100
+    def test_bare_399_now_unknown(self, day_fetcher):
+        """v2 破坏性示例：裸 399001 不再按深市指数推断。"""
+        from tzt_api import UnknownCodeError
+        with pytest.raises(UnknownCodeError):
+            day_fetcher.fetch_day_kline("399001", count=-1)

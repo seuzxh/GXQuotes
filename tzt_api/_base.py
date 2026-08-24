@@ -22,12 +22,8 @@ import yaml
 
 from tzt_api._transport import TZTClient
 from tzt_api.market import (
-    INDEX_CODE_MAP,
-    INDEX_CODE_PREFIXES,
     MARKET_CODE_MAP,
-    get_index_info,
     infer_market,
-    is_index,
     numeric_code,
 )
 
@@ -40,8 +36,6 @@ __all__ = [
     "MARKET_CODE_MAP",
     "KLINE_TYPE_MAP",
     "KLINE_RESPONSE_KEY_MAP",
-    "INDEX_CODE_MAP",
-    "INDEX_CODE_PREFIXES",
     "KLineFetcher",
 ]
 
@@ -137,19 +131,9 @@ class KLineFetcher:
         return numeric_code(code)
 
     @staticmethod
-    def is_index(code: str) -> bool:
-        """是否按指数处理（指数优先规则见 tzt_api.market.is_index）。"""
-        return is_index(code)
-
-    @staticmethod
-    def get_index_info(code: str) -> Optional[tuple]:
-        """指数 (名称, 市场代码) 或 None（委托 tzt_api.market.get_index_info）。"""
-        return get_index_info(code)
-
-    @staticmethod
     def infer_market(code: str) -> int:
-        """推断市场代码（指数优先；⚠️ 裸码 000001 按上证指数→沪市。
-        规则全文见 tzt_api.market.infer_market）。"""
+        """推断市场代码（v2 契约：显式前缀 > 个股段位 > 异常。
+        裸码 000xxx 抛 AmbiguousCodeError；规则全文见 tzt_api.market.infer_market）。"""
         return infer_market(code)
 
     def _throttle(self):

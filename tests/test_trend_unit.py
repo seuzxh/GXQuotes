@@ -7,7 +7,7 @@
 """
 import pytest
 
-from tzt_api import TrendFetcher
+from tzt_api import TrendFetcher, AmbiguousCodeError, UnknownCodeError
 from tzt_api._base import PRICE_SCALE, TURNOVER_SCALE
 
 
@@ -88,23 +88,26 @@ class TestBuildTrendParams:
         assert params["market"] == 1
 
     def test_market_inference_sz(self, fetcher):
-        # 000002 万科A（深市个股）。注意：裸码 "000001" 已按指数优先推断为
-        # 上证指数（market=1），深市个股请用 "sz000001" 或非白名单代码。
-        params = fetcher._build_trend_params("000002", date=0, daycount=0)
-        assert params["market"] == 0
+        # v2：裸码 000xxx 整段歧义（深市个股/沪市指数共存），参数构造期抛异常；
+        # 深市个股（如万科A、平安银行）请用显式前缀 "sz000002" / "sz000001"。
+        with pytest.raises(AmbiguousCodeError):
+            fetcher._build_trend_params("000002", date=0, daycount=0)
         params = fetcher._build_trend_params("sz000001", date=0, daycount=0)
         assert params["market"] == 0
 
-    def test_market_inference_index_priority(self, fetcher):
-        """指数优先：白名单指数裸码按其市场推断。"""
-        params = fetcher._build_trend_params("000300", date=0, daycount=0)
+    def test_market_inference_index_explicit_prefix(self, fetcher):
+        """v2：指数一律显式前缀（原「指数优先」裸码推断已随白名单删除）。"""
+        params = fetcher._build_trend_params("sh000300", date=0, daycount=0)
         assert params["market"] == 1   # 沪深300
-        params = fetcher._build_trend_params("399006", date=0, daycount=0)
+        params = fetcher._build_trend_params("sz399006", date=0, daycount=0)
         assert params["market"] == 0   # 创业板指
 
     def test_market_inference_bj(self, fetcher):
-        params = fetcher._build_trend_params("830799", date=0, daycount=0)
+        params = fetcher._build_trend_params("920001", date=0, daycount=0)
         assert params["market"] == 103
+        # v2：北交所旧码（83/43/87）已切换至 920 段，裸码 fail-fast
+        with pytest.raises(UnknownCodeError):
+            fetcher._build_trend_params("830799", date=0, daycount=0)
 
     def test_market_explicit_override(self, fetcher):
         params = fetcher._build_trend_params("600519", date=0, daycount=0, market=0)
