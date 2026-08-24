@@ -7,4 +7,4 @@
 - 自 kline-fetcher v3.0.1 拆分建包：KLineFetcher/_base、MinKLineFetcher、ConceptPlateFetcher、TrendFetcher 及 config
 - 新增 `tzt_api.market` 市场规则单一事实源（原 `_base` 常量与 infer_market/is_index/get_index_info 纯函数化；`KLineFetcher` 对应静态方法改为委托）
 - 依赖仅 requests + PyYAML（不再连带 numpy）
-- 2026-08-24：自 kline-fetcher monorepo（9b9613c）整体迁出，独立建仓 **GXQuant**（github.com/seuzxh/GXQuant）；中焯官方文档归档、概念板块接口资料与 tztapi-agent 指南随迁至本仓 `docs/`
+- 2026-08-24：自 kline-fetcher monorepo（9b9613c）整体迁出，独立建仓 **GXQuotes**（github.com/seuzxh/GXQuotes）；中焯官方文档归档、概念板块接口资料与 tztapi-agent 指南随迁至本仓 `docs/`

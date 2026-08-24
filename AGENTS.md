@@ -1,4 +1,4 @@
-# GXQuant（tzt-api 包）项目说明
+# GXQuotes（tzt-api 包）项目说明
 
 ## 项目定位
 

@@ -1,19 +1,19 @@
-# GXQuant（tzt-api）
+# GXQuotes（tzt-api）
 
 中焯行情 3.0 API 的 Python 客户端，专注封装 A 股行情接口：日K / 分钟K / 概念板块 / 分时（集合竞价 + 盘中）。零 numpy 依赖，仅 requests + PyYAML。
 
-> 仓库名 `GXQuant`，Python 发行名为 `tzt-api`（`pip install` / `import tzt_api`）——两者指向同一包。
+> 仓库名 `GXQuotes`，Python 发行名为 `tzt-api`（`pip install` / `import tzt_api`）——两者指向同一包。
 > 本仓库自 [kline-fetcher](https://github.com/seuzxh/kline-fetcher) monorepo 拆分而来（extracted from kline-fetcher@9b9613c）；qlib 数据管道（下载编排 + bin 格式转换）在 kline-fetcher 仓库的 `kline-qlib` 包，依赖本包。
 
 ## 安装
 
 ```bash
 # 从源安装
-pip install git+https://github.com/seuzxh/GXQuant.git
+pip install git+https://github.com/seuzxh/GXQuotes.git
 
 # 本地开发
-git clone https://github.com/seuzxh/GXQuant.git
-pip install -e ./GXQuant
+git clone https://github.com/seuzxh/GXQuotes.git
+pip install -e ./GXQuotes
 ```
 
 ## 环境变量
@@ -53,7 +53,7 @@ trend = tf.fetch_history_trend("000300", date="20260820")
 ## 项目结构
 
 ```
-GXQuant/
+GXQuotes/
 ├── tzt_api/
 │   ├── market.py         # 市场规则单一事实源（INDEX_CODE_MAP / infer_market 等）
 │   ├── _base.py          # KLineFetcher 基类：HTTP/限流重试/单位换算 + 日K方法
