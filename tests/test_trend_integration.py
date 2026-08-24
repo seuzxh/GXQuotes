@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-from tzt_api import TrendFetcher
+from tzt_api import TrendFetcher, AmbiguousCodeError
 
 TEST_CODE = "600519"    # 贵州茅台
 TEST_MARKET = 1         # 上海
@@ -187,9 +187,11 @@ class TestInheritance:
         assert data is not None and len(data) > 0
 
     def test_inherited_infer_market(self):
-        """TrendFetcher 继承 infer_market 静态方法（含指数优先规则）。"""
+        """TrendFetcher 继承 infer_market 静态方法（v2 显式契约）。"""
         assert TrendFetcher.infer_market("600519") == 1
-        # 裸码 000001 按指数优先规则推断为上证指数（market=1）；
-        # 取深市平安银行需用 "sz000001" 或显式 market=0（见 AGENTS.md「指数行情使用注意」）
-        assert TrendFetcher.infer_market("000001") == 1
+        # v2：裸码 000001 歧义（深市个股/沪市指数共存）→ 抛 AmbiguousCodeError；
+        # 上证指数请用 "sh000001"，深市平安银行用 "sz000001" 或显式 market=0
+        with pytest.raises(AmbiguousCodeError):
+            TrendFetcher.infer_market("000001")
+        assert TrendFetcher.infer_market("sh000001") == 1
         assert TrendFetcher.infer_market("sz000001") == 0
