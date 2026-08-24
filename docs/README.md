@@ -1,10 +1,14 @@
 # GXQuotes 文档索引
 
-> 目录结构（2026-08-24 重组）：`requirements/` 需求 · `API/` 接口文档 · `guide/` 使用指南
+> 目录结构（2026-08-24 重组）：`requirements/` 需求 · `plans/` 设计存档 · `API/` 接口文档 · `guide/` 使用指南
 
 ## requirements/ — 需求
 
-- [行情Skill需求.md](requirements/行情Skill需求.md) —— 行情 Skill 项目目标、功能/非功能需求、差距分析（对齐 v1.1.0）、里程碑与待确认问题
+- [行情Skill需求.md](requirements/行情Skill需求.md) —— 行情 Skill 项目目标、功能/非功能需求（v0.3：FR3 标的解析 v2 契约、FR6 10032 意图路由已定稿）、差距分析、里程碑
+
+## plans/ — 设计存档
+
+- [2026-08-24-market-v2-and-routing-design.md](plans/2026-08-24-market-v2-and-routing-design.md) —— market.py v2 显式契约（删白名单/段位规则/异常体系）与 SecurityResolver 10032 路由的完整设计记录与实测证据
 
 ## API/ — 接口文档
 
