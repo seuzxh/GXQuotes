@@ -32,8 +32,8 @@ class TrendFetcher(KLineFetcher):
         """构造分时数据请求参数"""
         if market is None:
             market = self.infer_market(code)
-        
-        numeric_code = code.lstrip("SHshSZszBJbj") or code
+
+        numeric_code = self._numeric_code(code)
         
         params = {
             "Action": 10001,
@@ -105,59 +105,63 @@ class TrendFetcher(KLineFetcher):
             result.append(row)
         return result
 
+    def _fetch_trend(self, code: str, date: int, daycount: int, market: Optional[int] = None, label: str = "") -> Optional[Dict[str, List[Dict]]]:
+        """分时请求与响应解析的统一实现（当日/历史共用）。"""
+        params = self._build_trend_params(code, date=date, daycount=daycount, market=market)
+        self.logger.info(f"Fetching trend: code={code}, label={label}, market={params['market']}")
+
+        raw = self._request(params)
+        if raw is None:
+            return None
+
+        error_no = raw.get("ErrorNo")
+        if error_no and str(error_no) != "0":
+            self.logger.warning(f"API error: {raw.get('ErrorMessage', 'unknown')}")
+            return None
+
+        result = {
+            "market_date": raw.get("marketdate", ""),
+            "pre_market": [],
+            "trading": [],
+        }
+
+        call_trend = raw.get("CallTrend")
+        if call_trend and isinstance(call_trend, list) and len(call_trend) > 0:
+            result["pre_market"] = self._parse_call_trend(call_trend[0])
+
+        trend_op = raw.get("TrendOp")
+        if trend_op and isinstance(trend_op, list) and len(trend_op) > 0:
+            result["trading"] = self._parse_trend_op(trend_op[0])
+
+        if not result["pre_market"] and not result["trading"]:
+            self.logger.warning(f"Empty trend data for code={code}, label={label}")
+            return None
+
+        return result
+
     def fetch_intraday_trend(self, code: str, market: Optional[int] = None) -> Optional[Dict[str, List[Dict]]]:
         """获取当日分时数据（date=0, daycount=0）
-        
+
         Args:
             code: 股票代码，支持 "600519", "SH600519" 等格式
             market: 市场代码，可选，自动推断
-        
+
         Returns:
             Dict 包含:
                 - pre_market: 盘前数据列表
                 - trading: 盘中数据列表
                 - market_date: 市场日期
         """
-        params = self._build_trend_params(code, date=0, daycount=0, market=market)
-        self.logger.info(f"Fetching intraday trend: code={code}, market={params['market']}")
-        
-        raw = self._request(params)
-        if raw is None:
-            return None
-        
-        error_no = raw.get("ErrorNo")
-        if error_no and str(error_no) != "0":
-            self.logger.warning(f"API error: {raw.get('ErrorMessage', 'unknown')}")
-            return None
-        
-        result = {
-            "market_date": raw.get("marketdate", ""),
-            "pre_market": [],
-            "trading": [],
-        }
-        
-        call_trend = raw.get("CallTrend")
-        if call_trend and isinstance(call_trend, list) and len(call_trend) > 0:
-            result["pre_market"] = self._parse_call_trend(call_trend[0])
-        
-        trend_op = raw.get("TrendOp")
-        if trend_op and isinstance(trend_op, list) and len(trend_op) > 0:
-            result["trading"] = self._parse_trend_op(trend_op[0])
-        
-        if not result["pre_market"] and not result["trading"]:
-            self.logger.warning(f"Empty trend data for code={code}")
-            return None
-        
-        return result
+        return self._fetch_trend(code, date=0, daycount=0, market=market, label="intraday")
 
     def fetch_history_trend(self, code: str, date: str, market: Optional[int] = None) -> Optional[Dict[str, List[Dict]]]:
         """获取历史分时数据（date指定日期, daycount=1）
-        
+
         Args:
             code: 股票代码，支持 "600519", "SH600519" 等格式
             date: 历史日期，格式 "YYYYMMDD"
             market: 市场代码，可选，自动推断
-        
+
         Returns:
             Dict 包含:
                 - pre_market: 盘前数据列表
@@ -169,38 +173,8 @@ class TrendFetcher(KLineFetcher):
         except (ValueError, TypeError):
             self.logger.error(f"Invalid date format: {date}, expected YYYYMMDD")
             return None
-        
-        params = self._build_trend_params(code, date=date_int, daycount=1, market=market)
-        self.logger.info(f"Fetching history trend: code={code}, date={date}, market={params['market']}")
-        
-        raw = self._request(params)
-        if raw is None:
-            return None
-        
-        error_no = raw.get("ErrorNo")
-        if error_no and str(error_no) != "0":
-            self.logger.warning(f"API error: {raw.get('ErrorMessage', 'unknown')}")
-            return None
-        
-        result = {
-            "market_date": raw.get("marketdate", ""),
-            "pre_market": [],
-            "trading": [],
-        }
-        
-        call_trend = raw.get("CallTrend")
-        if call_trend and isinstance(call_trend, list) and len(call_trend) > 0:
-            result["pre_market"] = self._parse_call_trend(call_trend[0])
-        
-        trend_op = raw.get("TrendOp")
-        if trend_op and isinstance(trend_op, list) and len(trend_op) > 0:
-            result["trading"] = self._parse_trend_op(trend_op[0])
-        
-        if not result["pre_market"] and not result["trading"]:
-            self.logger.warning(f"Empty history trend data for code={code}, date={date}")
-            return None
-        
-        return result
+
+        return self._fetch_trend(code, date=date_int, daycount=1, market=market, label=f"history {date}")
 
     def fetch_trend(self, code: str, date: Optional[str] = None, market: Optional[int] = None) -> Optional[Dict[str, List[Dict]]]:
         """获取分时数据（自动判断当日或历史）

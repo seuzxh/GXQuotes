@@ -8,7 +8,7 @@
 
 from typing import Dict, List, Optional
 
-from tzt_api._base import KLineFetcher, KLINE_TYPE_MAP, KLINE_RESPONSE_KEY_MAP
+from tzt_api._base import KLineFetcher, KLINE_TYPE_MAP
 
 __all__ = ["MinKLineFetcher"]
 
@@ -36,24 +36,13 @@ class MinKLineFetcher(KLineFetcher):
         if count is not None:
             params[f"{klinetype}.count"] = -abs(count)
 
-        response_key = KLINE_RESPONSE_KEY_MAP.get(klinetype)
-
         if pages <= 1:
             self.logger.info(f"Fetching {freq} kline: code={code}, market={params['market']}, count={params.get(f'{klinetype}.count')}")
             raw = self._request(params)
-            if raw is None:
+            items = self._extract_kline_list(raw, klinetype, label=f"code={code}")
+            if items is None:
                 return None
-
-            if not response_key or response_key not in raw:
-                self.logger.warning(f"No {response_key} in response for code={code}")
-                return None
-
-            data_list = raw[response_key]
-            if not data_list or len(data_list) == 0:
-                self.logger.warning(f"Empty {response_key} for code={code}")
-                return None
-
-            return self._parse_kline_items(data_list[0], klinetype)
+            return self._parse_kline_items(items, klinetype)
 
         all_data = []
         locator = None
@@ -65,19 +54,12 @@ class MinKLineFetcher(KLineFetcher):
 
             self.logger.info(f"Fetching {freq} kline page {page + 1}/{pages}: code={code}, market={page_params['market']}, count={page_params.get(f'{klinetype}.count')}")
             raw = self._request(page_params)
-            if raw is None:
+            items = self._extract_kline_list(raw, klinetype, label=f"code={code} at page {page + 1}")
+            if items is None:
+                self.logger.info(f"Stopping {freq} pagination at page {page + 1} (no data)")
                 break
 
-            if not response_key or response_key not in raw:
-                self.logger.warning(f"No {response_key} in response for code={code} at page {page + 1}")
-                break
-
-            data_list = raw[response_key]
-            if not data_list or len(data_list) == 0:
-                self.logger.info(f"Empty {response_key} for code={code} at page {page + 1}, stopping pagination")
-                break
-
-            parsed = self._parse_kline_items(data_list[0], klinetype)
+            parsed = self._parse_kline_items(items, klinetype)
             if not parsed:
                 break
             all_data.extend(parsed)

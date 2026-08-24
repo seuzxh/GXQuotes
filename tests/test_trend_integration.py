@@ -8,28 +8,15 @@
 或在已配置 KLINE_API_BASE_URL 的环境里：
     pytest tests/test_trend_integration.py -m integration --override-ini="addopts=-m integration"
 """
-import os
-
 import pytest
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("KLINE_API_BASE_URL"),
-        reason="需要设置 KLINE_API_BASE_URL 环境变量才能运行集成测试",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 from tzt_api import TrendFetcher
 
 TEST_CODE = "600519"    # 贵州茅台
 TEST_MARKET = 1         # 上海
 TEST_HISTORY_DATE = "20260611"  # 历史日期
-
-
-@pytest.fixture(scope="module")
-def trend_fetcher():
-    return TrendFetcher()
 
 
 # ============ 1. 当日分时数据 ============

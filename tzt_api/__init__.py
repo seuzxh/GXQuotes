@@ -6,11 +6,14 @@
     ConceptPlateFetcher    — 概念板块（继承 KLineFetcher）
     TrendFetcher           — 分时数据（继承 KLineFetcher）
     AdjustType             — 复权方式枚举
+    TZTClient              — 共享传输层（会话/进程级限流/重试，v1.1.0）
+    TZTError / TZTConnectionError / TZTAPIError — 类型化异常（v1.1.0，strict 模式）
 
 市场规则（与 kline-qlib 共享的单一事实源）见 tzt_api.market。
 qlib 数据转换/下载见 kline-qlib 包。
 """
 from tzt_api._base import KLineFetcher, AdjustType
+from tzt_api._transport import TZTClient, TZTError, TZTConnectionError, TZTAPIError
 from tzt_api.min_kline import MinKLineFetcher
 from tzt_api.concept_plate import ConceptPlateFetcher
 from tzt_api.trend import TrendFetcher
@@ -21,5 +24,9 @@ __all__ = [
     "ConceptPlateFetcher",
     "TrendFetcher",
     "AdjustType",
+    "TZTClient",
+    "TZTError",
+    "TZTConnectionError",
+    "TZTAPIError",
 ]
-__version__ = "1.0.0"
+__version__ = "1.1.0"

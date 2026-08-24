@@ -15,13 +15,12 @@
 
 import logging
 import os
-import time
 from enum import IntEnum
 from typing import Dict, List, Optional
 
-import requests
 import yaml
 
+from tzt_api._transport import TZTClient
 from tzt_api.market import (
     INDEX_CODE_MAP,
     INDEX_CODE_PREFIXES,
@@ -111,13 +110,22 @@ class KLineFetcher:
     以及日K线获取方法。分钟K线见 MinKLineFetcher，概念板块见 ConceptPlateFetcher。
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, strict: bool = False):
         if config_path is None:
             config_path = os.environ.get("KLINE_CONFIG_PATH", _DEFAULT_CONFIG)
         self.config = self._load_config(config_path)
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.session = requests.Session()
-        self._last_request_time = 0.0
+        self._client = TZTClient(self.config, self.logger, strict=strict)
+        self.session = self._client.session  # 向后兼容别名
+
+    @property
+    def strict(self) -> bool:
+        return self._client.strict
+
+    @property
+    def last_error(self):
+        """最近一次请求失败的原因（TZTError 子类）；成功后为 None。"""
+        return self._client.last_error
 
     def _load_config(self, config_path: str) -> Dict:
         with open(config_path, "r") as f:
@@ -145,62 +153,19 @@ class KLineFetcher:
         return infer_market(code)
 
     def _throttle(self):
-        interval = self.config.get("api", {}).get("request_interval", 0.1)
-        elapsed = time.time() - self._last_request_time
-        if elapsed < interval:
-            time.sleep(interval - elapsed)
-        self._last_request_time = time.time()
+        """限流（委托 TZTClient，进程级共享；保留方法名兼容既有调用/测试）。"""
+        self._client.throttle()
 
     def _request(self, params: Dict) -> Optional[Dict]:
-        base_url = os.environ.get("KLINE_API_BASE_URL") or self.config.get("api", {}).get("base_url", "")
-        if not base_url:
-            raise EnvironmentError(
-                "API base URL is not configured. "
-                "Set the KLINE_API_BASE_URL environment variable (e.g. in .env or as a GitHub Secret/Variable), "
-                "or set api.base_url in your kline_config.yaml."
-            )
-        timeout = self.config.get("api", {}).get("timeout", 10)
-        max_retries = self.config.get("api", {}).get("max_retries", 3)
-        retry_delay = self.config.get("api", {}).get("retry_delay", 1)
-
-        for attempt in range(max_retries):
-            self._throttle()
-            try:
-                resp = self.session.get(
-                    f"{base_url}/reqxml",
-                    params=params,
-                    timeout=timeout,
-                )
-                resp.raise_for_status()
-                result = resp.json()
-
-                error_no = result.get("ErrorNo")
-                if error_no and str(error_no) != "0":
-                    self.logger.warning(
-                        f"API error: {result.get('ErrorMessage', 'unknown')} "
-                        f"(ErrorNo={error_no}, attempt {attempt + 1})"
-                    )
-                    time.sleep(retry_delay * (2 ** attempt))
-                    continue
-
-                return result
-
-            except requests.exceptions.RequestException as e:
-                self.logger.warning(f"Request error: {e} (attempt {attempt + 1})")
-                time.sleep(retry_delay * (2 ** attempt))
-            except Exception as e:
-                self.logger.warning(f"Parse error: {e} (attempt {attempt + 1})")
-                time.sleep(retry_delay * (2 ** attempt))
-
-        self.logger.error(f"API request failed after {max_retries} retries: params={params}")
-        return None
+        """通用请求（委托 TZTClient；保留方法名兼容既有调用/测试 monkeypatch）。"""
+        return self._client.request(params)
 
     def _build_params(self, code: str, klinetype: str, market: Optional[int] = None, adjust: Optional[str] = None) -> Dict:
         kline_cfg = self.config.get("kline", {})
         if market is None:
             market = self.infer_market(code)
 
-        numeric_code = code.lstrip("SHshSZszBJbj") or code
+        numeric_code = self._numeric_code(code)
 
         cqtype_val = _resolve_adjust(adjust)
         if cqtype_val is None:
@@ -281,6 +246,29 @@ class KLineFetcher:
 
         return result
 
+    def _extract_kline_list(self, raw: Optional[Dict], klinetype: str, label: str = "") -> Optional[list]:
+        """从响应中提取K线原始列表（response_key 检查 → data_list[0] → 空判断）。
+
+        Args:
+            raw: _request 返回的响应字典
+            klinetype: K线类型码（KLINE_TYPE_MAP 的值，如 "500"）
+            label: 日志中标识请求对象的说明（如 "code=600519"）
+
+        Returns:
+            K线原始字典列表（data_list[0]）；无数据/结构不符时返回 None。
+        """
+        if raw is None:
+            return None
+        response_key = KLINE_RESPONSE_KEY_MAP.get(klinetype)
+        if not response_key or response_key not in raw:
+            self.logger.warning(f"No {response_key} in response for {label}")
+            return None
+        data_list = raw[response_key]
+        if not data_list or len(data_list) == 0:
+            self.logger.warning(f"Empty {response_key} for {label}")
+            return None
+        return data_list[0]
+
     # ===== 日K线方法 =====
 
     def fetch_day_kline(self, code: str, count: Optional[int] = None, market: Optional[int] = None, begindate: Optional[str] = None, enddate: Optional[str] = None, adjust: Optional[str] = None) -> Optional[List[Dict]]:
@@ -298,20 +286,10 @@ class KLineFetcher:
 
         self.logger.info(f"Fetching day kline: code={code}, market={params['market']}, count={params.get(f'{klinetype}.count')}, begindate={params.get('begindate')}, enddate={params.get('enddate')}")
         raw = self._request(params)
-        if raw is None:
+        items = self._extract_kline_list(raw, klinetype, label=f"code={code}")
+        if items is None:
             return None
-
-        response_key = KLINE_RESPONSE_KEY_MAP.get(klinetype)
-        if not response_key or response_key not in raw:
-            self.logger.warning(f"No DayKLine in response for code={code}")
-            return None
-
-        data_list = raw[response_key]
-        if not data_list or len(data_list) == 0:
-            self.logger.warning(f"Empty DayKLine for code={code}")
-            return None
-
-        return self._parse_kline_items(data_list[0], klinetype)
+        return self._parse_kline_items(items, klinetype)
 
     def fetch_day_kline_with_factor(self, code: str, count: Optional[int] = None, market: Optional[int] = None, begindate: Optional[str] = None, enddate: Optional[str] = None) -> Optional[List[Dict]]:
         hfq_data = self.fetch_day_kline(code, count=count, market=market, begindate=begindate, enddate=enddate, adjust="hfq")

@@ -9,39 +9,15 @@
 或在已配置 KLINE_API_BASE_URL 的环境里：
     pytest tests/test_split_interfaces.py -m integration --override-ini="addopts=-m integration"
 """
-import os
-
 import pytest
 
-# 若未配置 API 地址，跳过全部（避免 CI/无网络环境报错）
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("KLINE_API_BASE_URL"),
-        reason="需要设置 KLINE_API_BASE_URL 环境变量才能运行集成测试",
-    ),
-]
+pytestmark = pytest.mark.integration
 
-from tzt_api import KLineFetcher, MinKLineFetcher, ConceptPlateFetcher
+from tzt_api import KLineFetcher
 
 TEST_CODE = "600519"    # 贵州茅台
 TEST_MARKET = 1         # 上海
 TEST_PLATE = "994612"   # 概念板块
-
-
-@pytest.fixture(scope="module")
-def day_fetcher():
-    return KLineFetcher()
-
-
-@pytest.fixture(scope="module")
-def min_fetcher():
-    return MinKLineFetcher()
-
-
-@pytest.fixture(scope="module")
-def plate_fetcher():
-    return ConceptPlateFetcher()
 
 
 # ============ 1. KLineFetcher（base，日K）============
@@ -186,27 +162,13 @@ class TestMinKLineFetcher:
 
 
 # ============ 3. ConceptPlateFetcher（概念板块）============
+# 板块列表全量分页、单位换算、成份股生成器等深度校验见 test_concept_plates.py；
+# 此处仅保留基础冒烟与继承关系验证。
 
 class TestConceptPlateFetcher:
-    def test_get_all_concept_plates(self, plate_fetcher):
-        plates = plate_fetcher.get_all_concept_plates()
-        assert plates is not None and len(plates) > 0
-
-    def test_plate_field_completeness(self, plate_fetcher):
-        plates = plate_fetcher.get_all_concept_plates()
-        assert plates and all(k in plates[0] for k in ["code", "name", "market"])
-
     def test_get_concept_plate_kline(self, plate_fetcher):
         data = plate_fetcher.get_concept_plate_kline(TEST_PLATE, count=-5)
         assert data is not None and len(data) > 0
-
-    def test_get_concept_plate_stocks(self, plate_fetcher):
-        stocks = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=5)
-        assert stocks is not None and len(stocks) > 0
-
-    def test_stock_field_completeness(self, plate_fetcher):
-        stocks = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=3)
-        assert stocks and all(k in stocks[0] for k in ["code", "name", "market"])
 
     def test_get_stock_concept_plates(self, plate_fetcher):
         plates = plate_fetcher.get_stock_concept_plates(TEST_CODE, TEST_MARKET)
@@ -216,26 +178,3 @@ class TestConceptPlateFetcher:
         """ConceptPlateFetcher 继承基类的日K方法。"""
         data = plate_fetcher.fetch_day_kline(TEST_CODE, count=-1, market=TEST_MARKET, adjust="none")
         assert data is not None and len(data) > 0
-
-    def test_get_concept_plate_stocks_pagination(self, plate_fetcher):
-        """分页参数：start>0 取第二页。"""
-        page1 = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=3)
-        page2 = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=3, count=3)
-        if page1 and page2:
-            # 两页不应完全相同（除非成份股不足 3 只）
-            codes1 = {s["code"] for s in page1}
-            codes2 = {s["code"] for s in page2}
-            assert codes1 != codes2 or len(page1) < 3
-
-    def test_get_concept_plate_kline_fields(self, plate_fetcher):
-        """板块K线字段完整性。"""
-        data = plate_fetcher.get_concept_plate_kline(TEST_PLATE, count=-3)
-        if data:
-            required = ["date", "open", "high", "low", "close", "volume"]
-            assert all(k in data[-1] for k in required)
-
-    def test_get_all_concept_plates_market_value(self, plate_fetcher):
-        """所有板块的 market 字段应为 44（概念板块市场）。"""
-        plates = plate_fetcher.get_all_concept_plates()
-        if plates:
-            assert all(p.get("market") == 44 for p in plates[:10])

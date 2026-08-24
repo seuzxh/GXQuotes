@@ -56,17 +56,18 @@ trend = tf.fetch_history_trend("000300", date="20260820")
 GXQuotes/
 ├── tzt_api/
 │   ├── market.py         # 市场规则单一事实源（INDEX_CODE_MAP / infer_market 等）
-│   ├── _base.py          # KLineFetcher 基类：HTTP/限流重试/单位换算 + 日K方法
+│   ├── _transport.py     # TZTClient 传输层：会话/进程级共享限流/重试/类型化异常（v1.1.0）
+│   ├── _base.py          # KLineFetcher 基类：组合 TZTClient + 单位换算 + 日K方法
 │   ├── min_kline.py      # MinKLineFetcher：分钟K
 │   ├── concept_plate.py  # ConceptPlateFetcher：概念板块
 │   ├── trend.py          # TrendFetcher：分时
 │   └── config/kline_config.yaml
-├── tests/                # 单元 + 集成测试
+├── tests/                # 单元 + 集成测试（conftest.py 共享 fixtures）
 └── docs/
-    ├── API/中焯官方文档/  # 中焯官方技术资料（解析版 + 原件）——接口问题的第一查阅处
-    ├── API/概念板块请求API.md  # 概念板块接口原始抓包记录
-    ├── concept_plate_api.md   # 概念板块接口文档（参数/字段/单位）
-    └── guide/tztapi-agent.md  # tztapi-agent 接口智能体使用指南
+    ├── README.md         # 文档索引
+    ├── requirements/     # 需求（行情Skill需求.md）
+    ├── API/              # 接口文档（接口功能清单 / 中焯官方文档 / 概念板块）
+    └── guide/            # 使用指南（tztapi-agent）
 ```
 
 ## 测试
@@ -78,8 +79,12 @@ KLINE_API_BASE_URL=<地址> pytest -m integration   # 集成测试（需真实 A
 
 ## 文档
 
+目录索引见 [docs/README.md](docs/README.md)（requirements 需求 / API 接口文档 / guide 指南）：
+
+- [docs/requirements/行情Skill需求.md](docs/requirements/行情Skill需求.md) —— 行情 Skill 项目目标与需求基线
+- [docs/API/接口功能清单.md](docs/API/接口功能清单.md) —— 已实现数据接口总览（方法/参数/返回字段/实测状态）
 - [docs/API/中焯官方文档/README.md](docs/API/中焯官方文档/README.md) —— 官方资料导航（查什么 → 读哪份）
-- [docs/concept_plate_api.md](docs/concept_plate_api.md) —— 概念板块接口文档
+- [docs/API/concept_plate_api.md](docs/API/concept_plate_api.md) —— 概念板块接口文档
 - [docs/guide/tztapi-agent.md](docs/guide/tztapi-agent.md) —— 接口智能体使用指南
 
 ## 变更记录

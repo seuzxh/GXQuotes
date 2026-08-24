@@ -5,38 +5,15 @@
 需要网络与中焯行情 API。默认不运行（integration marker），手动触发：
     KLINE_API_BASE_URL=... pytest tests/test_indices_integration.py -m integration
 """
-import os
-
 import pytest
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("KLINE_API_BASE_URL"),
-        reason="需要设置 KLINE_API_BASE_URL 环境变量才能运行集成测试",
-    ),
-]
+pytestmark = pytest.mark.integration
 
-from tzt_api import KLineFetcher, MinKLineFetcher, TrendFetcher
+from tzt_api import KLineFetcher
 from tzt_api.market import INDEX_CODE_MAP
 
 # 历史分时用最近已知的交易日（周五）；当前日期附近取一个肯定的历史交易日
 HISTORY_TREND_DATE = "20260821"
-
-
-@pytest.fixture(scope="module")
-def day_fetcher():
-    return KLineFetcher()
-
-
-@pytest.fixture(scope="module")
-def min_fetcher():
-    return MinKLineFetcher()
-
-
-@pytest.fixture(scope="module")
-def trend_fetcher():
-    return TrendFetcher()
 
 
 class TestIndexDayKline:

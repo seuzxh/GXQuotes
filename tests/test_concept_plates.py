@@ -1,265 +1,129 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""概念板块集成测试（v1.1.0 重写：pytest 风格，聚焦深度校验与新能力）。
 
-"""
-概念板块功能完整测试文件
-使用 unittest 框架测试 ConceptPlateFetcher 类中的概念板块相关功能
+覆盖：板块列表全量分页、快照字段单位换算自洽性、板块K线、成份股（含
+板块自身首项行为）、iter_concept_plate_stocks 全量生成器、股票所属板块。
 
-v2.1.0 起，概念板块方法已从 KLineFetcher 剥离到 ConceptPlateFetcher。
-本测试为集成测试（需真实 API），默认不运行，手动触发：
+需真实 API（integration marker；跳过条件由 conftest.py 统一处理）：
     pytest tests/test_concept_plates.py -m integration
 """
-
-import sys
-import os
-
-# 添加项目根目录到路径，使测试文件能找到 kline_fetcher 模块
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-import unittest
-import logging
 import pytest
+
 from tzt_api import ConceptPlateFetcher
 
-# 标记为集成测试：默认跳过，仅在设置 KLINE_API_BASE_URL 且显式 -m integration 时运行
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("KLINE_API_BASE_URL"),
-        reason="需要设置 KLINE_API_BASE_URL 环境变量才能运行集成测试",
-    ),
-]
+pytestmark = pytest.mark.integration
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+TEST_PLATE = "994612"   # AI芯片（成份股总数约 40，见 docs/API/concept_plate_api.md）
+TEST_STOCK = "600519"   # 贵州茅台
+TEST_MARKET = 1         # 上海
 
 
-class TestConceptPlates(unittest.TestCase):
-    """概念板块功能测试类"""
+class TestGetAllConceptPlates:
+    """全量分页（v1.1.0：此前仅返回前 30 条）。"""
 
-    @classmethod
-    def setUpClass(cls):
-        """测试类初始化，在所有测试方法执行前运行一次"""
-        logger.info("=== 初始化概念板块测试 ===")
-        cls.fetcher = ConceptPlateFetcher()
-        # 保存测试用的概念板块代码和股票代码
-        cls.test_plate_code = "994612"  # 示例概念板块代码
-        cls.test_stock_code = "600519"  # 示例股票代码（贵州茅台）
-        cls.test_stock_market = 1  # 市场代码（1表示上海）
+    def test_full_pagination_beyond_single_page(self, plate_fetcher):
+        """全量板块数应超过单页上限 100，证明翻页生效（实测总数约 390）。"""
+        plates = plate_fetcher.get_all_concept_plates()
+        assert plates is not None
+        assert len(plates) > 100
 
-    def setUp(self):
-        """每个测试方法执行前运行"""
-        logger.info(f"\n--- 开始测试: {self._testMethodName} ---")
+    def test_limit_truncates(self, plate_fetcher):
+        plates = plate_fetcher.get_all_concept_plates(limit=5)
+        assert plates is not None and len(plates) == 5
 
-    def tearDown(self):
-        """每个测试方法执行后运行"""
-        logger.info(f"--- 测试完成: {self._testMethodName} ---\n")
+    def test_fields_complete_and_market_44(self, plate_fetcher):
+        plates = plate_fetcher.get_all_concept_plates()
+        assert plates
+        for plate in plates:
+            for field in ("code", "name", "market"):
+                assert field in plate and plate[field] is not None
+            assert plate["market"] == 44
 
-    def test_01_get_all_concept_plates(self):
-        """
-        测试 get_all_concept_plates 方法
-        验证：
-        1. 返回值不为 None
-        2. 返回值是非空列表
-        3. 每个板块包含必填字段（code, name, market）
-        """
-        logger.info("测试获取所有概念板块列表")
-        
-        # 调用方法
-        plates = self.fetcher.get_all_concept_plates()
-        
-        # 验证返回值不为 None
-        self.assertIsNotNone(plates, "获取概念板块失败，返回 None")
-        
-        # 验证返回值是列表类型
-        self.assertIsInstance(plates, list, "返回值不是列表类型")
-        
-        # 验证列表不为空
-        self.assertGreater(len(plates), 0, "概念板块列表为空")
-        
-        # 验证每个板块包含必填字段
-        required_fields = ["code", "name", "market"]
-        for i, plate in enumerate(plates[:5]):  # 只检查前5个板块
-            with self.subTest(plate_index=i):
-                for field in required_fields:
-                    self.assertIn(field, plate, f"板块缺少必填字段: {field}")
-                    self.assertIsNotNone(plate[field], f"字段 {field} 的值为 None")
-        
-        logger.info(f"成功获取 {len(plates)} 个概念板块")
-        logger.info(f"第一个板块: {plates[0]}")
-
-    def test_02_get_concept_plate_kline(self):
-        """
-        测试 get_concept_plate_kline 方法
-        验证：
-        1. 返回值不为 None
-        2. 返回值是非空列表
-        3. 每条K线数据包含完整字段
-        """
-        logger.info(f"测试获取概念板块 {self.test_plate_code} 的K线数据")
-        
-        # 调用方法
-        kline_data = self.fetcher.get_concept_plate_kline(self.test_plate_code)
-        
-        # 验证返回值不为 None
-        self.assertIsNotNone(kline_data, "获取概念板块K线失败，返回 None")
-        
-        # 验证返回值是列表类型
-        self.assertIsInstance(kline_data, list, "返回值不是列表类型")
-        
-        # 验证列表不为空
-        self.assertGreater(len(kline_data), 0, "K线数据列表为空")
-        
-        # 验证每条K线包含必填字段
-        required_fields = ["date", "open", "high", "low", "close", "volume", "amount"]
-        for i, kline in enumerate(kline_data[:5]):  # 只检查前5条K线
-            with self.subTest(kline_index=i):
-                for field in required_fields:
-                    self.assertIn(field, kline, f"K线缺少必填字段: {field}")
-                    self.assertIsNotNone(kline[field], f"字段 {field} 的值为 None")
-        
-        logger.info(f"成功获取 {len(kline_data)} 条K线数据")
-        logger.info(f"最新K线: {kline_data[0]}")
-
-    def test_03_get_concept_plate_stocks(self):
-        """
-        测试 get_concept_plate_stocks 方法
-        验证：
-        1. 返回值不为 None
-        2. 返回值是非空列表
-        3. 每只股票包含必填字段（code, name, market）
-        """
-        logger.info(f"测试获取概念板块 {self.test_plate_code} 的成份股")
-        
-        # 调用方法
-        stocks = self.fetcher.get_concept_plate_stocks(self.test_plate_code)
-        
-        # 验证返回值不为 None
-        self.assertIsNotNone(stocks, "获取概念板块成份股失败，返回 None")
-        
-        # 验证返回值是列表类型
-        self.assertIsInstance(stocks, list, "返回值不是列表类型")
-        
-        # 验证列表不为空
-        self.assertGreater(len(stocks), 0, "成份股列表为空")
-        
-        # 验证每只股票包含必填字段
-        required_fields = ["code", "name", "market"]
-        for i, stock in enumerate(stocks[:5]):  # 只检查前5只股票
-            with self.subTest(stock_index=i):
-                for field in required_fields:
-                    self.assertIn(field, stock, f"股票缺少必填字段: {field}")
-                    self.assertIsNotNone(stock[field], f"字段 {field} 的值为 None")
-        
-        logger.info(f"成功获取 {len(stocks)} 只成份股")
-        logger.info(f"第一只股票: {stocks[0]}")
-
-    def test_04_get_stock_concept_plates(self):
-        """
-        测试 get_stock_concept_plates 方法（v2.1.2 重写：基于官方属性 901 CoBlkIdx）
-        验证：
-        1. 返回值不为 None 且是非空列表
-        2. 每个板块包含必填字段（code, name, market, type）
-        3. plate_type 过滤生效
-        """
-        logger.info(f"测试获取股票 {self.test_stock_code} 所属的概念板块")
-
-        # 调用方法
-        plates = self.fetcher.get_stock_concept_plates(
-            self.test_stock_code,
-            self.test_stock_market
-        )
-
-        # 验证返回值不为 None
-        self.assertIsNotNone(plates, "获取股票所属概念板块失败，返回 None")
-
-        # 验证返回值是列表类型且非空（贵州茅台必有所属板块）
-        self.assertIsInstance(plates, list, "返回值不是列表类型")
-        self.assertGreater(len(plates), 0, "板块列表为空")
-
-        # 验证每个板块包含必填字段
-        required_fields = ["code", "name", "market", "type"]
-        for i, plate in enumerate(plates[:5]):  # 只检查前5个板块
-            with self.subTest(plate_index=i):
-                for field in required_fields:
-                    self.assertIn(field, plate, f"板块缺少必填字段: {field}")
-                    self.assertIsNotNone(plate[field], f"字段 {field} 的值为 None")
-                self.assertIn(plate["type"], ("industry", "region", "concept"))
-
-        # 验证 plate_type 过滤
-        concepts = self.fetcher.get_stock_concept_plates(
-            self.test_stock_code,
-            self.test_stock_market,
-            plate_type="concept"
-        )
-        self.assertIsNotNone(concepts)
-        self.assertGreater(len(concepts), 0, "概念板块过滤结果为空")
-        for plate in concepts:
-            self.assertEqual(plate["type"], "concept")
-
-        logger.info(f"成功获取 {len(plates)} 个板块（其中概念 {len(concepts)} 个）")
-        logger.info(f"前几个板块: {plates[:3]}")
-
-    def test_05_get_concept_plate_kline_custom_count(self):
-        """
-        测试 get_concept_plate_kline 方法的自定义数量参数
-        验证：
-        1. 可以指定获取特定数量的K线数据
-        """
-        logger.info(f"测试获取概念板块 {self.test_plate_code} 的自定义数量K线数据")
-        
-        # 测试获取较少数量的K线
-        test_count = -10
-        kline_data = self.fetcher.get_concept_plate_kline(
-            self.test_plate_code,
-            count=test_count
-        )
-        
-        # 验证返回值不为 None
-        self.assertIsNotNone(kline_data, "获取概念板块K线失败，返回 None")
-        
-        # 验证返回的K线数量不超过请求的数量（考虑API返回的可能限制）
-        self.assertLessEqual(len(kline_data), abs(test_count) + 10, f"获取的K线数量过多")
-        
-        logger.info(f"成功获取 {len(kline_data)} 条K线数据（请求 {abs(test_count)} 条）")
-
-    def test_06_get_concept_plate_stocks_pagination(self):
-        """
-        测试 get_concept_plate_stocks 方法的分页功能
-        验证：
-        1. 可以通过 start 和 count 参数进行分页获取
-        """
-        logger.info(f"测试获取概念板块 {self.test_plate_code} 的分页成份股")
-        
-        # 测试第一页
-        stocks_page1 = self.fetcher.get_concept_plate_stocks(
-            self.test_plate_code,
-            start=0,
-            count=5
-        )
-        
-        # 验证第一页数据
-        self.assertIsNotNone(stocks_page1, "获取第一页成份股失败，返回 None")
-        self.assertGreater(len(stocks_page1), 0, "第一页成份股列表为空")
-        
-        # 测试第二页
-        stocks_page2 = self.fetcher.get_concept_plate_stocks(
-            self.test_plate_code,
-            start=5,
-            count=5
-        )
-        
-        # 验证第二页数据
-        self.assertIsNotNone(stocks_page2, "获取第二页成份股失败，返回 None")
-        
-        logger.info(f"第一页: {len(stocks_page1)} 只股票")
-        logger.info(f"第二页: {len(stocks_page2)} 只股票")
+    def test_snapshot_units_self_consistency(self, plate_fetcher):
+        """换算后自洽：change_pct ≈ change / (price - change) × 100（2026-08-24 实测标定）。"""
+        plates = plate_fetcher.get_all_concept_plates(limit=10)
+        checked = 0
+        for p in plates:
+            if not all(k in p for k in ("price", "change", "change_pct")):
+                continue
+            prev = p["price"] - p["change"]
+            if prev > 0 and p["change_pct"] != 0:
+                implied = p["change"] / prev * 100
+                assert abs(implied - p["change_pct"]) < 0.05, (
+                    f"{p['code']} change_pct={p['change_pct']} 与 implied={implied:.3f} 不符"
+                )
+                checked += 1
+        assert checked > 0, "样例中无可校验行（快照字段缺失？）"
 
 
-if __name__ == "__main__":
-    # 运行所有测试
-    unittest.main(verbosity=2)
+class TestConceptPlateKline:
+    def test_kline_custom_count(self, plate_fetcher):
+        data = plate_fetcher.get_concept_plate_kline(TEST_PLATE, count=-10)
+        assert data is not None and len(data) > 0
+        assert len(data) <= 20  # 请求 10 条，允许小幅冗余
+
+    def test_kline_fields_complete(self, plate_fetcher):
+        data = plate_fetcher.get_concept_plate_kline(TEST_PLATE, count=-3)
+        required = ["date", "open", "high", "low", "close", "volume", "amount"]
+        assert data and all(k in data[-1] for k in required)
+
+
+class TestConceptPlateStocks:
+    def test_single_page_contains_plate_itself_first(self, plate_fetcher):
+        """block.include=1：首项为板块自身（market=44），其后为成份股。"""
+        stocks = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=5)
+        assert stocks is not None and len(stocks) > 0
+        assert stocks[0]["market"] == 44
+        assert all(s["market"] != 44 for s in stocks[1:])
+
+    def test_snapshot_fields_converted(self, plate_fetcher):
+        """v1.1.0 起 price/change/change_pct 已换算（元/点、%），量级合理。"""
+        stocks = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=5)
+        assert stocks
+        for s in stocks:
+            if "price" in s:
+                assert 0 < s["price"] < 100000
+            if "change_pct" in s:
+                assert -11 <= s["change_pct"] <= 11
+
+    def test_manual_pagination(self, plate_fetcher):
+        page1 = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=5)
+        page2 = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=5, count=5)
+        assert page1 and page2
+        codes1 = {s["code"] for s in page1 if s["market"] != 44}
+        codes2 = {s["code"] for s in page2}
+        assert not (codes1 & codes2), "两页出现重叠"
+
+
+class TestIterConceptPlateStocks:
+    """v1.1.0 新增：自动翻页全量成份股生成器。"""
+
+    def test_full_membership_excludes_plate_itself(self, plate_fetcher):
+        stocks = list(plate_fetcher.iter_concept_plate_stocks(TEST_PLATE))
+        assert len(stocks) > 10  # 994612 实测约 39 只成份股
+        assert all(s["market"] != 44 for s in stocks), "不应包含板块自身（market=44）"
+        codes = [s["code"] for s in stocks]
+        assert len(codes) == len(set(codes)), "成份股不应重复"
+
+    def test_membership_consistent_with_single_page(self, plate_fetcher):
+        """生成器结果与手动首页结果一致（首页剔除板块自身后为前缀）。"""
+        full = list(plate_fetcher.iter_concept_plate_stocks(TEST_PLATE, page_size=50))
+        page = [s for s in plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=50)
+                if s["market"] != 44]
+        assert [s["code"] for s in full[:len(page)]] == [s["code"] for s in page]
+
+
+class TestStockConceptPlates:
+    def test_fields_and_types(self, plate_fetcher):
+        plates = plate_fetcher.get_stock_concept_plates(TEST_STOCK, TEST_MARKET)
+        assert plates, "贵州茅台必有所属板块"
+        for plate in plates:
+            for field in ("code", "name", "market", "type"):
+                assert field in plate and plate[field] is not None
+            assert plate["type"] in ("industry", "region", "concept")
+
+    def test_filter_concept(self, plate_fetcher):
+        concepts = plate_fetcher.get_stock_concept_plates(TEST_STOCK, TEST_MARKET, plate_type="concept")
+        assert concepts
+        assert all(p["type"] == "concept" for p in concepts)
