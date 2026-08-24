@@ -13,7 +13,7 @@ class TestTztApiStructure:
             "MarketResolutionError", "AmbiguousCodeError", "UnknownCodeError",
             "SecurityResolver",
         }
-        assert tzt_api.__version__ == "1.1.0"  # v2.0.0 待发版（M2 Task 8 提升）
+        assert tzt_api.__version__ == "2.0.0"  # M2 Task 8 发版
 
     def test_module_location(self):
         from tzt_api import KLineFetcher

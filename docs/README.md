@@ -9,6 +9,7 @@
 ## plans/ — 设计存档
 
 - [2026-08-24-market-v2-and-routing-design.md](plans/2026-08-24-market-v2-and-routing-design.md) —— market.py v2 显式契约（删白名单/段位规则/异常体系）与 SecurityResolver 10032 路由的完整设计记录与实测证据
+- [2026-08-25-m2-implementation.md](plans/2026-08-25-m2-implementation.md) —— M2 实施计划（market v2 / 错误分类 / 板块分钟行情 / SecurityResolver / 行情 Skill，Task 1-8）
 
 ## API/ — 接口文档
 
@@ -20,3 +21,7 @@
 ## guide/ — 使用指南
 
 - [tztapi-agent.md](guide/tztapi-agent.md) —— 中焯接口智能体使用指南（新建/校验/咨询三类场景与铁律）
+
+## skill/ — 行情 Skill 交付（仓库根，v2.0.0）
+
+- [../skill/SKILL.md](../skill/SKILL.md) —— agent skill 入口：八子命令（resolve/dayk/mink/trend/plates/members/platek/platetrend）、JSON 输出契约、退出码语义（0/2/3/4）、标的解析规则（显式前缀优先 / 裸码歧义反问）与安全铁律

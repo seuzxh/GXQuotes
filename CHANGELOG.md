@@ -2,6 +2,29 @@
 
 本文件记录 tzt-api 的版本变更（Keep a Changelog 格式）。
 
+## [2.0.0] - 2026-08-25
+
+M2 里程碑发版：market v2 显式契约 + SecurityResolver 标的意图路由 + 板块分钟行情 + 行情 Skill 交付。测试规模：单元 134 项 + 集成 109 项全部通过（2026-08-25 实测网关）。
+
+**破坏性变更（FR3 v2 契约，详见 [docs/plans/2026-08-24-market-v2-and-routing-design.md](docs/plans/2026-08-24-market-v2-and-routing-design.md)）**
+- 删除指数白名单与指数优先推断：`INDEX_CODE_MAP`/`INDEX_CODE_PREFIXES`/`is_index`/`get_index_info` 移除；
+  取指数一律显式前缀（sh000300 沪深300 / sz399001 深证成指 / bj899050 北证50）或显式 market
+- 裸码 000xxx 抛 `AmbiguousCodeError`、未知段位抛 `UnknownCodeError`（原"默认深"与 v1 "000001→上证指数"遮蔽规则移除）；
+  段位规则新增 900（沪B）与 920（北交所现行码段，2026 由 83/43/87 切换而来，旧码 fail-fast 并提示 920 切换）
+- kline-qlib 迁移指引：市场判断改用新 `infer_market`；取指数改显式前缀；
+  其 `converter.code_to_qlib_dir` 裸码 000xxx→sz 行为需与新契约对齐（在 kline-fetcher 仓库跟进）
+
+**新增**
+- `SecurityResolver`（`tzt_api/search.py`，10032 意图路由：6 位代码/中文名/拼音首字母 → unique/ambiguous/not_found/error，
+  支持 `prefer="index"/"stock"` 意图过滤）
+- 板块分钟K `get_concept_plate_min_kline` 与板块分时 `get_concept_plate_trend`（G6，market=44 通道；
+  分钟K/分时私有实现上移基类 `_fetch_kline_series`/`_fetch_trend_raw`，与个股侧 DRY 复用）
+- TZTClient 错误分类：不可重试 ErrorNo fail-fast（-2300/-989903/-200608/-206008，不再 3 次重试 + 退避）、
+  `accept_error_nos` 结果状态码透传（10032 的 ErrorNo=1/2 按成功返回）
+- 行情 Skill 交付（`skill/SKILL.md` + `skill/scripts/quotes.py`，agent skill 形态）：
+  八子命令（resolve/dayk/mink/trend/plates/members/platek/platetrend），stdout 输出 JSON，
+  退出码 0 成功 / 2 未找到 / 3 歧义（打印候选供反问）/ 4 网关配置错误；裸码歧义自动经 SecurityResolver 复析
+
 ## [1.1.0] - 2026-08-24
 
 架构优化（服务行情 Skill 目标，M1）+ 板块接口能力修正。公共 API 向后兼容（kline-qlib 无感）。
