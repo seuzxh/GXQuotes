@@ -11,6 +11,7 @@ class TestTztApiStructure:
             "TrendFetcher", "AdjustType",
             "TZTClient", "TZTError", "TZTConnectionError", "TZTAPIError",
             "MarketResolutionError", "AmbiguousCodeError", "UnknownCodeError",
+            "SecurityResolver",
         }
         assert tzt_api.__version__ == "1.1.0"  # v2.0.0 待发版（M2 Task 8 提升）
 

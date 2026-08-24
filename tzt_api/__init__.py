@@ -10,6 +10,7 @@
     TZTError / TZTConnectionError / TZTAPIError — 类型化异常（v1.1.0，strict 模式）
     MarketResolutionError / AmbiguousCodeError / UnknownCodeError
                            — v2 市场解析异常（market.py v2 契约，随 v2.0.0 发版）
+    SecurityResolver      — 10032 标的意图路由（search.py，unique/ambiguous/not_found/error）
 
 市场规则（与 kline-qlib 共享的单一事实源）见 tzt_api.market。
 qlib 数据转换/下载见 kline-qlib 包。
@@ -27,6 +28,7 @@ from tzt_api.market import (
     AmbiguousCodeError,
     UnknownCodeError,
 )
+from tzt_api.search import SecurityResolver
 
 __all__ = [
     "KLineFetcher",
@@ -41,5 +43,6 @@ __all__ = [
     "MarketResolutionError",
     "AmbiguousCodeError",
     "UnknownCodeError",
+    "SecurityResolver",
 ]
 __version__ = "1.1.0"
