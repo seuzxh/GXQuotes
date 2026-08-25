@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tzt-api"
 version = "2.0.0"
-description = "中焯行情 3.0 API 客户端（A股日K/分钟K/概念板块/分时）"
+description = "中焯行情 3.0 API 客户端（A股日K/分钟K/板块/分时）"
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.28",

@@ -39,7 +39,7 @@
 | 10001 | 分时（trendtypes=-1 全时段） | `TrendFetcher`（CallTrend=46 集合竞价 / TrendOp=43 盘中 / 421~423 盘口） |
 | 10002 | K线（klinetype=属性 ID） | `fetch_day_kline` / `fetch_min_kline` / `get_concept_plate_kline` |
 | 10005 | 板块菜单（block.include 含板块指数时放首位） | `get_concept_plate_stocks` |
-| 10007 | 板块指数排行（subtype=1 概念板块） | `get_all_concept_plates` |
+| 10007 | 板块指数排行（subtype 0/1/2/3=行业/概念/地域/风格） | `get_all_plates` / `get_all_concept_plates` |
 | 未用 | 10003 成交明细 / 10004 分价量 / 10006 市场排行 / 10009 统计 / 10011 多市场筛选（filter 语法 `514,top 10`）/ 20700 市场信息 | — |
 
 **K线属性 ID**（`klinetype` 取值 ↔ 响应键，见属性 ID 文档第 2 章）：

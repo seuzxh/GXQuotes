@@ -37,6 +37,49 @@ class TestSkillScript:
         p = run("trend", "sh600519")
         assert p.returncode == 0 and "trading" in json.loads(p.stdout)["data"]
 
+    def test_plate_list_all_types(self):
+        p = run("plate-list", "--type", "all", "--limit", "2")
+        assert p.returncode == 0
+        payload = json.loads(p.stdout)
+        assert payload["meta"]["count"] == 8
+        assert payload["meta"]["counts"] == {
+            "industry": 2,
+            "concept": 2,
+            "region": 2,
+            "style": 2,
+        }
+        assert {row["type"] for row in payload["data"]} == {
+            "industry", "concept", "region", "style",
+        }
+
+    def test_plate_list_custom_sort(self):
+        p = run(
+            "plate-list", "--type", "concept", "--sort", "amount",
+            "--direction", "desc", "--limit", "3",
+        )
+        assert p.returncode == 0
+        payload = json.loads(p.stdout)
+        assert payload["meta"]["sort"] == {"field": "amount", "direction": "desc"}
+        values = [row["amount"] for row in payload["data"]]
+        assert values == sorted(values, reverse=True)
+        assert all("sort_value" not in row for row in payload["data"])
+
+    def test_members_custom_sort_and_limit(self):
+        p = run(
+            "members", "994612", "--sort", "amount",
+            "--direction", "desc", "--limit", "3",
+        )
+        assert p.returncode == 0
+        payload = json.loads(p.stdout)
+        assert payload["meta"]["plate"] == "994612"
+        assert payload["meta"]["limit"] == 3
+        assert payload["meta"]["sort"] == {"field": "amount", "direction": "desc"}
+        assert len(payload["data"]) == 3
+        values = [row["amount"] for row in payload["data"]]
+        assert values == sorted(values, reverse=True)
+        assert all(str(row["market"]) != "44" for row in payload["data"])
+        assert all("sort_value" not in row for row in payload["data"])
+
     def test_plate_min_kline(self):
         p = run("platek", "994612", "--freq", "5min", "--count", "-3")
         assert p.returncode == 0 and len(json.loads(p.stdout)["data"]) > 0

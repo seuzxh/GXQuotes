@@ -2,8 +2,9 @@
 name: gxquotes
 description: >
   A股行情数据技能：日K/分钟K（前/后/不复权 + 复权因子）、实时与历史分时、个股与
-  主要指数、概念板块归属/成份股/板块指数行情（日K + 分钟K + 分时）。触发词：行情、
-  K线、分时、复权、指数、概念板块、成份股、板块。数据口径：价格/成交额=元、
+  主要指数、行业/概念/地域/风格板块列表、个股板块归属/成份股/板块指数
+  行情（日K + 分钟K + 分时）。触发词：行情、K线、分时、复权、指数、行业板块、
+  概念板块、地域板块、风格板块、成份股、板块。数据口径：价格/成交额=元、
   成交量=股、涨跌幅=%。
 ---
 
@@ -29,7 +30,7 @@ description: >
 - 成交量（volume）：**股**（非手）
 - 涨跌幅（change_pct）：**%**
 
-## 八个子命令（示例均可直接运行）
+## 九个子命令（示例均可直接运行）
 
 ### 1. resolve — 标的解析
 
@@ -76,7 +77,28 @@ exit 0 → `{"data": {"market_date","pre_market":[...],"trading":[{"date","time"
 
 - `--date YYYYMMDD`：历史分时（缺省当日）
 
-### 5. plates — 个股所属板块
+### 5. plate-list — 板块列表/排行
+
+```bash
+python skill/scripts/quotes.py plate-list --type concept --sort change_pct --direction desc --limit 30
+```
+
+exit 0 → `{"data": [{"code","name","market", "<27个普通标量props字段>"}], "meta": {"count", "market":44, "type", "subtype", "full", "sort", "retrieved_at"}}`
+
+- `--type industry|concept|region|style|all`：默认 `concept`；`all` 按
+  industry → concept → region → style 的固定顺序合并，每条数据补 `type`。
+- 默认 `--limit 30`；`all` 时表示每类最多 30 个。用户明确说“全部/全量”时才用
+  `--full`，库层自动翻页。`--limit` 与 `--full` 互斥。
+- `--sort` 默认 `change_pct`，`--direction asc|desc` 默认 `desc`。每条数据固定
+  返回请求 props 中除 906 外的 27 个普通标量具名字段；缺失值为 `null`，不使用
+  通用 `sort_value`。完整字段、单位和自然语言映射见
+  [板块排序字段](references/plate-sort-fields.md)。
+- `meta.sort` 和 `meta.retrieved_at` 记录排序口径。`full=true`
+  仅表示客户端未主动截断；多页动态排行不是强一致快照，市场波动时可能出现页间漂移。
+- 自然语言路由：“行业板块/概念板块/地域板块/风格板块”直接映射到对应
+  `--type`；“所有类型板块”映射到 `--type all`。
+
+### 6. plates — 个股所属板块
 
 ```bash
 python skill/scripts/quotes.py plates sh600519 --type concept
@@ -86,17 +108,24 @@ exit 0 → `{"data": [{"code","name","market","type":"concept|industry|region"}]
 
 - `--type concept|industry|region`：过滤；缺省返回全部并带 `type` 字段
 
-### 6. members — 板块成份股
+### 7. members — 板块成份股
 
 ```bash
-python skill/scripts/quotes.py members 994612
+python skill/scripts/quotes.py members 994612 --sort change_pct --direction desc --limit 30
 ```
 
-exit 0 → `{"data": [{"code","name","market","price","change","change_pct","high","low"}], ...}`
+exit 0 → `{"data": [{"code","name","market","price","change","change_pct","high","low","<选中的排序字段>"}], "meta": {"count","plate","full","sort","retrieved_at"}}`
 
-- 默认前 50 只（已剔除板块自身占位行）；`--all` 自动翻页拉取全量
+- `--sort` 与 `--direction asc|desc` 的字段和自然语言映射与 `plate-list`
+  共用[板块与成份股排序字段](references/plate-sort-fields.md)；默认涨跌幅降序。
+- 默认 `--limit 50`，可指定前 N 只；超过100时自动按网关单页上限分页并有界
+  截取。`--all` 自动翻页拉取全量，与 `--limit` 互斥。
+- 输出已剔除 `market=44` 的板块自身占位行；保持基础快照字段，并追加当前
+  排序字段的具名值，不使用 `sort_value`。价格类在此表示股票价格（元）。
+- `meta.sort` 与 `meta.retrieved_at` 记录排行口径；全量实时排行分页不是强一致快照，
+  市场波动时可能出现页间漂移。
 
-### 7. platek — 板块指数K线
+### 8. platek — 板块指数K线
 
 ```bash
 python skill/scripts/quotes.py platek 994612 --freq 5min --count -3
@@ -104,7 +133,7 @@ python skill/scripts/quotes.py platek 994612 --freq 5min --count -3
 
 exit 0 → 分钟K（结构同 mink，带 `time` 字段）。不给 `--freq` 则为日K（结构同 dayk，缺省 -120 根）。
 
-### 8. platetrend — 板块指数分时
+### 9. platetrend — 板块指数分时
 
 ```bash
 python skill/scripts/quotes.py platetrend 994612
@@ -126,7 +155,8 @@ exit 0 → 结构同 trend（`market_date/pre_market/trading`）；`--date YYYYM
    - not_found → exit 2
 3. **中文名/拼音**：dayk/mink/trend/plates 的 `<代码>` 参数同样支持（走上述复析通道），
    或先 `resolve` 再取数。
-4. **板块代码直传**：members/platek/platetrend 的板块代码（如 994612）属未知段位，
+4. **板块列表与代码直传**：用户未给板块代码时，先用 `plate-list` 找到代码；
+   members/platek/platetrend 的板块代码（如 994612）属未知段位，
    但板块子命令固定 market=44 直传网关，**不需要也不做标的解析**。
 
 ## 错误语义（退出码表）
@@ -146,6 +176,7 @@ exit 0 → 结构同 trend（`market_date/pre_market/trading`）；`--date YYYYM
 - **限流铁律**：对网关请求间隔 **≥0.1s**（库内进程级共享限流自动保证）；
   不要绕过库并发刷网关，也不要多进程并行狂拉。
 - **按需拉取**：优先给明确的 `--count/--begin/--end` 而非默认全量
-  （默认 dayk -120 / mink -240）；成份股默认前 50，确需全量再 `--all`。
+  （默认 dayk -120 / mink -240）；板块列表默认每类 30，确需全量再 `--full`；
+  成份股默认前 50，确需全量再 `--all`。
 - **不复用超过当日的数据**：行情不是历史事实，分时/分钟K/快照随盘变化；
   跨日引用必须重新拉取，缓存至多当日有效。
