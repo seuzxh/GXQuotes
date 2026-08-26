@@ -23,8 +23,14 @@ import sys
 from datetime import datetime, timezone
 from itertools import islice
 
+# Release 中的自包含依赖位于 scripts/vendor；仓库内开发时仍优先使用仓库源码。
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_VENDOR_DIR = os.path.join(_SCRIPT_DIR, "vendor")
+if os.path.isdir(_VENDOR_DIR) and _VENDOR_DIR not in sys.path:
+    sys.path.insert(0, _VENDOR_DIR)
+
 # 仓库内直跑支持：skill/scripts/ → 仓库根（tzt_api 所在处）
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".."))
 if os.path.isdir(os.path.join(_REPO_ROOT, "tzt_api")) and _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
@@ -54,7 +60,7 @@ except ImportError:  # 环境缺依赖：给出可操作的指引而非 tracebac
     print(json.dumps({"error": {
         "kind": "dependency",
         "message": "无法导入 tzt-api 库",
-        "actionable": "请在 GXQuotes 仓库内运行本脚本（自动加入 sys.path），或先 pip install -e <仓库路径>",
+        "actionable": "请使用 Release 中的完整 skill 包，或在 GXQuotes 仓库内运行并先安装项目依赖",
     }}, ensure_ascii=False, indent=2))
     sys.exit(4)
 

@@ -1,0 +1,133 @@
+name: coze-skill-pack
+
+on:
+  push:
+    paths:
+      - "skill/**"
+      - "tzt_api/**"
+      - "pyproject.toml"
+      - "scripts/coze-skill-*.sh"
+      - ".github/workflows/coze-skill-pack.yml"
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "skill/**"
+      - "tzt_api/**"
+      - "pyproject.toml"
+      - "scripts/coze-skill-*.sh"
+      - ".github/workflows/coze-skill-pack.yml"
+  workflow_dispatch:
+    inputs:
+      skill_dir:
+        description: "skill 目录（仓库相对路径，SKILL.md 须在其根）"
+        required: false
+        default: "skill"
+      skill_id:
+        description: "产出名；缺省取 SKILL.md 的 name"
+        required: false
+        default: ""
+      version:
+        description: "版本；缺省时 tag 取 tag 名，其他情况取 pyproject.toml"
+        required: false
+        default: ""
+
+concurrency:
+  group: coze-skill-pack-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+# 默认只读；只有 release job 获得 contents: write。
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    name: Validate and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install repository dependencies
+        run: python -m pip install -e .
+
+      - name: Resolve build inputs
+        id: metadata
+        shell: bash
+        env:
+          INPUT_SKILL_DIR: ${{ inputs.skill_dir || 'skill' }}
+          INPUT_SKILL_ID: ${{ inputs.skill_id }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          for value in "$INPUT_SKILL_DIR" "$INPUT_SKILL_ID" "$INPUT_VERSION"; do
+            if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+              echo "Build inputs must not contain newlines" >&2
+              exit 1
+            fi
+          done
+
+          version="$INPUT_VERSION"
+          if [[ -z "$version" && "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ -n "$version" && ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "Invalid version: $version" >&2
+            exit 1
+          fi
+
+          printf 'skill_dir=%s\n' "$INPUT_SKILL_DIR" >> "$GITHUB_OUTPUT"
+          printf 'skill_id=%s\n' "$INPUT_SKILL_ID" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate source skill
+        env:
+          SKILL_DIR: ${{ steps.metadata.outputs.skill_dir }}
+        run: bash scripts/coze-skill-validate.sh "$SKILL_DIR"
+
+      - name: Build self-contained .skill
+        env:
+          SKILL_DIR: ${{ steps.metadata.outputs.skill_dir }}
+          SKILL_ID: ${{ steps.metadata.outputs.skill_id }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: bash scripts/coze-skill-pack.sh "$SKILL_DIR" dist "$SKILL_ID" "$VERSION"
+
+      - name: Show package contents
+        run: |
+          archive="$(find dist -maxdepth 1 -type f -name '*.skill' -print -quit)"
+          unzip -l "$archive"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gxquotes-skill
+          path: dist/*.skill
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Attach to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packaged skill
+        uses: actions/download-artifact@v4
+        with:
+          name: gxquotes-skill
+          path: dist
+
+      - name: Create release and attach skill
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.skill
+          fail_on_unmatched_files: true
+          generate_release_notes: true

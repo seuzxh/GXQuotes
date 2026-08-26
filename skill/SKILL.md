@@ -19,9 +19,9 @@ description: >
   `error.message` 附配置指引。配置方式：
   `export KLINE_API_BASE_URL="http://183.242.5.14:7778"`
   （或写入 `tzt_api/config/kline_config.yaml` 的 `api.base_url`）
-- Python ≥3.9 + tzt-api v2.0.0（依赖仅 requests + PyYAML）。
-  在 GXQuotes 仓库内直接运行即可（脚本自动把仓库根加入 `sys.path`）；
-  仓库外使用需先 `pip install -e <本仓库>`
+- Coze / GitHub Release 产物以 Python 3.11 为运行时目标，并在 `scripts/vendor/`
+  内携带 tzt-api v2.0.0、requests、PyYAML 等全部 Python 依赖，可直接执行；
+  tzt-api 库本身支持 Python ≥3.9。在 GXQuotes 仓库内开发时，脚本会优先加载仓库源码。
 
 ## 单位口径（全部子命令统一）
 
