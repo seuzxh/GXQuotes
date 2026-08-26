@@ -1,16 +1,19 @@
-# 概念板块接口文档
+# 板块接口文档
 
 > 实现位置：`tzt-api/tzt_api/concept_plate.py`（`ConceptPlateFetcher`；兼容壳 `kline_fetcher.concept_plate` 仍可用）
 > 原始抓包参数：[概念板块请求API.md](概念板块请求API.md)（iOS 客户端抓取，部分参数冗余）
-> 本文所有结论基于 **2026-08-22 真实 API 实测**。
+> 本文所有结论基于中焯官方文档及 **2026-08-25 真实 API 实测**。
 
 ## 接口总览
 
 | # | 方法 | Action | 用途 | 实测状态 |
 |---|------|--------|------|---------|
-| 1 | `get_all_concept_plates(limit=None)` | 10007 | 概念板块列表 | ✅ v1.1.0 起**自动翻页全量**（约 390 个，见 1.4）；v1.0.x 仅前 30 |
+| 1 | `get_all_plates(..., sort_by="change_pct", direction="desc")` | 10007 | 四类板块列表 + 27项排序/完整标量 props | ✅ 四类可用，自动翻页 |
+| 1a | `get_all_concept_plates(limit=None, page_size=100)` | 10007 | 概念板块兼容入口 | ✅ 等价于 `get_all_plates("concept", ...)` |
 | 2 | `get_concept_plate_kline(plate_code, count, market)` | 10002 | 板块日K线 | ✅ 可用 |
-| 3 | `get_concept_plate_stocks(plate_code, start, count)` | 10005 | 板块成份股 | ✅ 可用，**返回首项为板块自身**（见 3.3）；另有 `iter_concept_plate_stocks()` 生成器（v1.1.0，自动翻页全量并剔除板块自身） |
+| 2a | `get_concept_plate_min_kline(plate_code, freq, count, pages)` | 10002 | 板块分钟K线 | ✅ 可用 |
+| 2b | `get_concept_plate_trend(plate_code, date)` | 10001 | 板块分时 | ✅ 可用 |
+| 3 | `get_concept_plate_stocks(..., sort_by="change_pct", direction="desc")` | 10005 | 板块成份股排行 | ✅ 27项排序，**返回首项为板块自身**（见 3.3）；另有自动翻页迭代器 |
 | 4 | `get_stock_concept_plates(code, market, plate_type)` | 10000 | 股票所属板块 | ✅ **已修复可用**（官方属性 900/901/923，见 4.1） |
 
 > v1.1.0 起快照字段（price/change/high/low/change_pct）**已按 §5 统一换算**（元/点/%），不再返回原始整数。
@@ -19,30 +22,47 @@
 from tzt_api import ConceptPlateFetcher
 
 fetcher = ConceptPlateFetcher()
-plates = fetcher.get_all_concept_plates()
+concepts = fetcher.get_all_concept_plates()       # 向后兼容
+industries = fetcher.get_all_plates("industry") # 全量行业板块
+top_styles = fetcher.get_all_plates("style", limit=30)
 ```
 
-**关键概念**：概念板块市场代码固定为 `market=44`，板块代码为 `99xxxx`（如 `994612` AI芯片）。
+**关键概念**：四类板块的市场代码均固定为 `market=44`，板块代码为 `99xxxx`（如 `994612` AI芯片）。
 
 ---
 
-## 1. get_all_concept_plates — 概念板块列表
+## 1. get_all_plates — 四类板块列表
 
 ### 1.1 签名与请求参数
 
 ```python
-fetcher.get_all_concept_plates() -> Optional[List[Dict]]
+fetcher.get_all_plates(
+    plate_type="concept", limit=None, page_size=100,
+    *, sort_by="change_pct", direction="desc",
+) -> Optional[List[Dict]]
 ```
+
+`plate_type` 映射为：
+
+| `plate_type` | `subtype` | 含义 |
+|---|---:|---|
+| `industry` | 0 | 行业板块 |
+| `concept` | 1 | 概念板块 |
+| `region` | 2 | 地域板块 |
+| `style` | 3 | 风格板块 |
+
+`get_all_concept_plates(limit=None, page_size=100, *, sort_by="change_pct", direction="desc")`
+保留为兼容入口并原样转发排序参数。
 
 | 请求参数 | 值 | 说明 |
 |---|---|---|
 | `Action` | `10007` | 板块二级列表 |
-| `market` | `44` | 概念板块市场 |
-| `start` / `count` | `0` / `30` | **硬编码**，未暴露为方法参数（见 1.4） |
-| `sort` | `514` | 按涨幅排序 |
-| `direction` | `1` | 降序 |
+| `market` | `44` | 板块市场 |
+| `start` / `count` | `0...` / `1-100` | 方法内自动翻页，`page_size` 最大 100 |
+| `sort` | 由 `sort_by` 映射 | 27 个普通标量属性，默认 `change_pct→514` |
+| `direction` | `0/1` | `asc→0` 升序，`desc→1` 降序（默认） |
 | `groups` | `HQ_StockInfo\|HQ_StockProp` | 字段分组 |
-| `subtype` | `1` | 概念板块类型 |
+| `subtype` | `0/1/2/3` | 由 `plate_type` 决定 |
 
 ### 1.2 返回值结构（解析后）
 
@@ -52,15 +72,26 @@ fetcher.get_all_concept_plates() -> Optional[List[Dict]]
         "code": "994662",        # 板块代码 (str)
         "name": "锂矿概念",       # 板块名称 (str)
         "market": 44,            # 市场代码 (int)
-        "price": 1942300000,     # 最新点位（API 原始整数，÷1e6 = 1942.30）
-        "change": 62010000,      # 涨跌（原始整数，÷1e6 = 62.01 点）
-        "change_pct": 3297,      # 涨跌幅（原始整数，÷1000 = 3.297%，实测推断）
+        "price": 1942.30,        # 最新点位（已换算）
+        "change": 62.01,         # 涨跌（点，已换算）
+        "change_pct": 3.297,     # 涨跌幅（%，已换算）
+        "amount": 37671367457.66, # 总成交额（无论当前按何字段排序均返回）
+        "volume": 4389123456.0,   # 总成交量（股）
+        "volume_ratio": 1.234,    # 量比（倍）
+        # ...其余普通标量 props 字段；缺失值为 None
     },
     ...
 ]
 ```
 
 请求失败返回 `None`。
+
+排序字段使用稳定 snake_case 键；价格类输出点、金额输出元、量输出股、
+百分比输出 `%`、量比输出倍数。完整 27 项映射见
+[`skill/references/plate-sort-fields.md`](../../skill/references/plate-sort-fields.md)。
+每条结果固定返回表中的全部 27 个具名标量字段，不受当前 `sort_by` 影响；
+缺列、短列或空值统一返回 `None`。结果不生成通用 `sort_value`。
+906 是关联列表，按既有请求参数保留，但不解析、不进入返回结果。
 
 ### 1.3 关键原始响应字段（列式数组）
 
@@ -76,13 +107,16 @@ fetcher.get_all_concept_plates() -> Optional[List[Dict]]
 
 ### 1.4 分页（v1.1.0 起由方法内置）
 
-`get_all_concept_plates(limit=None)` 自动翻页直至短页。网关分页语义（2026-08-24 复测确认）：
+`get_all_plates(..., limit=None)` 自动翻页直至短页或响应 `max`。
+`limit=N` 会连同最后一页的请求 `count` 一起收窄；`limit` 必须为正整数或 `None`。
+网关分页语义（2026-08-25 复测确认）：
 
 - 板块总数 `max = 390`（以响应为准，可能随时间变化）
 - `start` 翻页有效（start=100 取第二页，与首页无重叠；start 超过总数返回空且无 ErrorNo）
 - **单次 `count` 上限 100**（超过报 `ErrorNo=-2300 请求数量不能超过100`）
+- 列表按所选行情属性排序，多页请求不属于强一致快照；市场波动时理论上可发生页间重复或遗漏
 
-v1.0.x 需自行分页（历史参考）：
+v1.0.x 需自行分页（仅作历史参考）：
 
 ```python
 def get_all_plates_paged(fetcher):
@@ -163,14 +197,19 @@ fetcher.get_concept_plate_kline(plate_code, count=-220, market=44) -> Optional[L
 ### 3.1 签名与请求参数
 
 ```python
-fetcher.get_concept_plate_stocks(plate_code, start=0, count=10) -> Optional[List[Dict]]
+fetcher.get_concept_plate_stocks(
+    plate_code, start=0, count=10,
+    *, sort_by="change_pct", direction="desc",
+) -> Optional[List[Dict]]
 ```
 
 | 参数 | 说明 |
 |---|---|
 | `plate_code` | 板块代码 |
 | `start` | 分页起始（0 起） |
-| `count` | 每页数量 |
+| `count` | 每页数量，必须为1到100 |
+| `sort_by` | 27个普通数值行情字段的稳定英文键，默认 `change_pct` |
+| `direction` | `asc` 升序 / `desc` 降序，默认 `desc` |
 
 | 请求参数 | 值 | 说明 |
 |---|---|---|
@@ -178,6 +217,9 @@ fetcher.get_concept_plate_stocks(plate_code, start=0, count=10) -> Optional[List
 | `block` | 传入的 `plate_code` | 板块代码 |
 | `block.include` | `1` | **响应包含板块自身**（见 3.3） |
 | `routemarkets` | `44` | |
+| `sort` | 由 `sort_by` 映射 | 默认 `change_pct→514` |
+| `direction` | `0/1` | `asc→0` / `desc→1` |
+| `props` | 33项 | GXAPP 6.3.4真实请求字段；其中27项开放数值排序 |
 
 ### 3.2 返回值结构（解析后）
 
@@ -187,18 +229,26 @@ fetcher.get_concept_plate_stocks(plate_code, start=0, count=10) -> Optional[List
         "code": "994612",         # ⚠️ 第一项是板块自身（见 3.3）
         "name": "AI芯片",
         "market": 44,
-        "price": 1843790000,      # 最新价（÷1e6）
-        "change": 2550000,        # 涨跌（÷1e6）
-        "change_pct": 138,        # 涨跌幅（÷1000 = 0.138%）
-        "high": 1860040000,       # 最高（÷1e6）
-        "low": 1812210000,        # 最低（÷1e6）
+        "price": 1818.12,          # 最新点位（已换算；板块自身行为点）
+        "change": 21.99,           # 涨跌（点）
+        "change_pct": 1.224,       # 涨跌幅（%）
+        "high": 1827.75,
+        "low": 1760.18,
     },
-    {"code": "300192", "name": "科德教育", "market": 0, ...},   # 真正的成份股
+    {
+        "code": "300192", "name": "科德教育", "market": 0,
+        "price": 18.43, "change_pct": 2.31,
+        "amount": 376713674.25,    # sort_by="amount" 时追加，单位元
+        ...
+    },
     ...
 ]
 ```
 
 `market` 字段是各股票的真实市场（0=深 / 1=沪），可直接用于后续行情请求。
+返回保持基础快照字段，并追加当前 `sort_by` 的具名字段；缺失值为 `None`，
+不生成 `sort_value`。完整27项字段与单位见
+[`skill/references/plate-sort-fields.md`](../../skill/references/plate-sort-fields.md)。
 
 ### 3.3 ⚠️ 返回首项为板块自身（重要）
 
@@ -212,7 +262,19 @@ real_stocks = [s for s in stocks if s["market"] != 44]        # 过滤掉板块�
 ### 3.4 分页与总数
 
 - 响应 `max` 字段 = **成份股总数**（实测 AI芯片 板块 max=40，与 UpQty+DownQty+EqualQty=39+1 吻合）
-- `start`/`count` 分页，取全量需循环翻页（过滤板块自身后约 max-1 条）
+- `count=N` 实测返回1条板块自身加N条成份股；`start` 仅按成份股数量推进
+- `iter_concept_plate_stocks(..., sort_by=..., direction=...)` 自动翻页、剔除板块自身，
+  并在每页保持同一排序参数；实时多页排行不属于强一致快照
+
+### 3.5 可排序字段边界
+
+10005与10007共享27个普通数值行情字段，包括价格、涨跌幅、量额、换手率、
+量比和3/5/10/20/60/120/250日涨幅。以下请求字段不向公共排序契约开放：
+
+- `43 TrendOp`：完整盘中分时数组，不是标量
+- `560 ContUp`：连板中文字符串
+- `60/61/62`：只对板块自身有意义的涨跌平家数，普通成份股可能为无效哨兵
+- `189 TradeContMin`：交易分钟数，不是成份股行情排行指标
 
 ---
 

@@ -2,6 +2,25 @@
 
 本文件记录 tzt-api 的版本变更（Keep a Changelog 格式）。
 
+## [Unreleased]
+
+**新增**
+- `ConceptPlateFetcher.get_all_plates()`：统一获取行业/概念/地域/风格板块，
+  `plate_type` 分别映射 Action 10007 的 subtype 0/1/2/3，支持 `limit` 和自动翻页；
+  新增 27 个普通标量字段的 `sort_by` 与 `direction=asc|desc`；返回行固定携带
+  全部 27 个已换算的具名标量 props 字段（缺失为 `None`，906 不解析）；
+  `get_all_concept_plates()` 保留为向后兼容入口
+- 行情 Skill 新增 `plate-list` 子命令：`--type industry|concept|region|style|all`，
+  支持 `--sort` 与 `--direction`；默认每类最多 30 条，显式 `--full` 获取全量；
+  `all` 输出每条补充 `type`
+- 根目录 `fetch_all_concept_plates.py` 增加 `--type/--sort/--direction`，
+  支持按指定字段导出单类或四类全量板块
+- `ConceptPlateFetcher.get_concept_plate_stocks()` 与全量迭代器新增 27 个普通
+  数值字段的 `sort_by`、`direction=asc|desc`；保持默认涨跌幅降序，返回当前
+  排序字段的已换算具名值，并修正 `block.include=1` 下全量分页推进偏移
+- 行情 Skill `members` 新增 `--sort/--direction/--limit`，与 `--all` 配合支持
+  板块成份股排行；输出 `meta.sort/retrieved_at` 供 Agent 明确数据口径
+
 ## [2.0.0] - 2026-08-25
 
 M2 里程碑发版：market v2 显式契约 + SecurityResolver 标的意图路由 + 板块分钟行情 + 行情 Skill 交付。测试规模：单元 134 项 + 集成 109 项全部通过（2026-08-25 实测网关）。

@@ -24,4 +24,4 @@
 
 ## skill/ — 行情 Skill 交付（仓库根，v2.0.0）
 
-- [../skill/SKILL.md](../skill/SKILL.md) —— agent skill 入口：八子命令（resolve/dayk/mink/trend/plates/members/platek/platetrend）、JSON 输出契约、退出码语义（0/2/3/4）、标的解析规则（显式前缀优先 / 裸码歧义反问）与安全铁律
+- [../skill/SKILL.md](../skill/SKILL.md) —— agent skill 入口：九子命令（含四类板块 `plate-list`）、JSON 输出契约、退出码语义（0/2/3/4）、标的解析规则（显式前缀优先 / 裸码歧义反问）与安全铁律

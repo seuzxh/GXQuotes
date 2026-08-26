@@ -1,31 +1,122 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""概念板块相关请求：板块列表、板块K线、板块成份股、股票所属板块。
+"""板块相关请求：行业/概念/地域/风格列表、板块K线、成份股、股票所属板块。
 
-继承 KLineFetcher 获得 _request 等底座。概念板块方法既非纯日K也非纯分钟K，
+继承 KLineFetcher 获得 _request 等底座。板块方法既非纯日K也非纯分钟K，
 独立成模块以便后续演进（如板块成份股分页、所属板块多策略解析等）。
 
 单位口径（2026-08-24 实测标定，见 docs/concept_plate_api.md §5）：
-  快照字段 price/change/high/low 原始为「万分之一」→ ÷1e6 换算为元/点；
-  change_pct 原始为「千分之一」→ ÷1000 换算为 %。
+  价格类原始为「万分之一」→ ÷1e6 换算为元/点；
+  成交额原始为「万元」→ ÷1e4 换算为元；成交量类原始单位为股；
+  百分比与量比类原始为「千分之一」→ ÷1000 换算为 %/倍。
   2026-08 前（v1.0.x）这些字段直接返回原始整数，v1.1.0 起统一换算。
 """
 
-from typing import Dict, Iterator, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Iterator, List, Optional, Sequence
 
 from tzt_api._base import KLineFetcher
 
-__all__ = ["ConceptPlateFetcher"]
+__all__ = [
+    "PLATE_MARKET",
+    "PLATE_LIST_PROPS",
+    "MEMBER_LIST_PROPS",
+    "MEMBER_SORT_FIELDS",
+    "PLATE_SORT_DIRECTIONS",
+    "PLATE_SORT_FIELDS",
+    "PlateSortField",
+    "PLATE_TYPE_TO_SUBTYPE",
+    "PLATE_TYPE_ORDER",
+    "ConceptPlateFetcher",
+]
 
 # 10007 板块列表单页上限（超过报 ErrorNo=-2300 请求数量不能超过100，实测确认）
 PLATE_LIST_PAGE_MAX = 100
+PLATE_MARKET = 44
+PLATE_TYPE_TO_SUBTYPE = {
+    "industry": 0,
+    "concept": 1,
+    "region": 2,
+    "style": 3,
+}
+PLATE_TYPE_ORDER = tuple(PLATE_TYPE_TO_SUBTYPE)
+
+# 10007 请求的现有 props 顺序保持不变；906 仅保留为原有返回字段。
+PLATE_LIST_PROPS = (
+    10, 510, 514, 573, 4, 575, 5, 574, 6, 576, 7, 577, 12, 13, 21,
+    551, 513, 521, 23, 906, 751, 752, 753, 754, 755, 756, 757, 11,
+)
+
+# 10005 成份股请求字段，顺序与 GXAPP 6.3.4 真实请求保持一致。
+# 43=完整盘中分时、560=连板字符串、60/61/62=板块涨跌平家数、189=交易分钟数；
+# 这些字段不适合作为成份股数值排行，因此 MEMBER_SORT_FIELDS 只取普通标量行情字段。
+MEMBER_LIST_PROPS = (
+    43, 560, 10, 510, 514, 573, 4, 575, 5, 574, 6, 576, 7, 577,
+    12, 13, 21, 551, 513, 521, 23, 751, 752, 753, 754, 755, 756,
+    757, 60, 61, 62, 11, 189,
+)
+
+
+@dataclass(frozen=True)
+class PlateSortField:
+    """10007 普通标量排序字段的稳定公共定义。"""
+
+    prop_id: int
+    raw_key: str
+    label: str
+    unit: str
+    value_type: str
+
+
+# 映射依据：GXZQ tztZFPropField.json v1.0.20 + 中焯官方属性表。
+# 906=CoLeadStock 是关联 list，不属于普通标量 sort，故不放入注册表。
+PLATE_SORT_FIELDS = {
+    "price": PlateSortField(10, "QuoteLast", "最新点位", "点", "price"),
+    "change": PlateSortField(510, "PxChg", "涨跌", "点", "price"),
+    "change_pct": PlateSortField(514, "PxChgPct", "涨跌幅", "%", "percentage"),
+    "change_speed_3m_pct": PlateSortField(573, "3MinPxChg", "3分钟涨速", "%", "percentage"),
+    "previous_close": PlateSortField(4, "PreClose", "昨收", "点", "price"),
+    "previous_change_pct": PlateSortField(575, "PrePxChgPct", "昨日涨跌幅", "%", "percentage"),
+    "open": PlateSortField(5, "Open", "今开", "点", "price"),
+    "open_change_pct": PlateSortField(574, "OpenPxChgPct", "开盘涨跌幅", "%", "percentage"),
+    "high": PlateSortField(6, "High", "最高", "点", "price"),
+    "high_change_pct": PlateSortField(576, "HighPxChgPct", "最高涨跌幅", "%", "percentage"),
+    "low": PlateSortField(7, "Low", "最低", "点", "price"),
+    "low_change_pct": PlateSortField(577, "LowPxChgPct", "最低涨跌幅", "%", "percentage"),
+    "volume": PlateSortField(12, "Volume", "总成交量", "股", "volume"),
+    "amount": PlateSortField(13, "Turnover", "总成交额", "元", "amount"),
+    "last_volume": PlateSortField(21, "NewVol", "现手", "股", "volume"),
+    "turnover_rate": PlateSortField(551, "TurnoverRate", "换手率", "%", "percentage"),
+    "amplitude": PlateSortField(513, "Amplitude", "振幅", "%", "percentage"),
+    "volume_ratio": PlateSortField(521, "VolRelRatio", "量比", "倍", "ratio"),
+    "inside_volume": PlateSortField(23, "Inside", "内盘", "股", "volume"),
+    "change_pct_3d": PlateSortField(751, "PxChgPct3TD", "3日涨幅", "%", "percentage"),
+    "change_pct_5d": PlateSortField(752, "PxChgPct5TD", "5日涨幅", "%", "percentage"),
+    "change_pct_10d": PlateSortField(753, "PxChgPct10TD", "10日涨幅", "%", "percentage"),
+    "change_pct_20d": PlateSortField(754, "PxChgPct20TD", "20日涨幅", "%", "percentage"),
+    "change_pct_60d": PlateSortField(755, "PxChgPct60TD", "60日涨幅", "%", "percentage"),
+    "change_pct_120d": PlateSortField(756, "PxChgPct120TD", "120日涨幅", "%", "percentage"),
+    "change_pct_250d": PlateSortField(757, "PxChgPct250TD", "250日涨幅", "%", "percentage"),
+    "reference_price": PlateSortField(11, "QuotePreClose", "报价基准价", "点", "price"),
+}
+
+PLATE_SORT_DIRECTIONS = {"asc": 0, "desc": 1}
+
+# 10005 与 10007 共享同一套 27 个普通数值行情属性和稳定英文键。
+# 使用派生注册表避免协议 ID、单位换算在两个接口中出现双重事实源。
+MEMBER_SORT_FIELDS = {
+    name: field
+    for name, field in PLATE_SORT_FIELDS.items()
+    if field.prop_id in MEMBER_LIST_PROPS
+}
 
 
 class ConceptPlateFetcher(KLineFetcher):
     """概念板块数据获取客户端。
 
     提供中焯行情 API 的概念板块相关接口封装：
-      - get_all_concept_plates：获取所有概念板块列表（自动翻页，全量）
+      - get_all_plates：按行业/概念/地域/风格获取板块列表（自动翻页）
+      - get_all_concept_plates：get_all_plates("concept") 的兼容入口
       - get_concept_plate_kline：获取指定板块的日K线
       - get_concept_plate_min_kline：获取板块指数分钟K线（v2.0.0 新增，G6）
       - get_concept_plate_trend：获取板块指数分时（v2.0.0 新增，G6）
@@ -43,7 +134,41 @@ class ConceptPlateFetcher(KLineFetcher):
         """比率类字段（千分之一）→ %（如 PxChgPct 原始 3297 → 3.297%）。"""
         return round(raw / 1000, 3)
 
-    def _parse_quote_rows(self, raw: Dict, with_high_low: bool = False) -> List[Dict]:
+    def _convert_plate_sort_field(self, raw, field: PlateSortField):
+        """按 tztZFPropField 的值类型将排序字段换算为对外单位。"""
+        if raw is None:
+            return None
+        if field.value_type == "price":
+            return self._convert_price(raw)
+        if field.value_type == "amount":
+            return self._convert_turnover(raw)
+        if field.value_type == "volume":
+            return self._convert_volume(raw)
+        if field.value_type in ("percentage", "ratio"):
+            return self._convert_ratio(raw)
+        raise ValueError(f"未知板块排序值类型: {field.value_type}")
+
+    def _get_plate_field_value(self, raw: Dict, index: int,
+                               field: PlateSortField):
+        """安全读取并换算一项列式板块字段，返回 ``(是否存在, 值)``。"""
+        values = raw.get(field.raw_key)
+        if not isinstance(values, list) or index >= len(values):
+            return False, None
+        value = values[index]
+        if value is None:
+            return True, None
+        try:
+            return True, self._convert_plate_sort_field(value, field)
+        except (TypeError, ValueError) as exc:
+            self.logger.warning(
+                "Invalid plate field %s at row %s: %r (%s)",
+                field.raw_key, index, value, exc,
+            )
+            return True, None
+
+    def _parse_quote_rows(self, raw: Dict, with_high_low: bool = False,
+                          include_all_plate_fields: bool = False,
+                          additional_fields: Optional[Sequence[str]] = None) -> List[Dict]:
         """解析列式快照响应（StockCode/StockName/MarketSN + 可选行情列），单位换算后返回行列表。"""
         if not ("StockCode" in raw and "StockName" in raw and "MarketSN" in raw):
             return []
@@ -55,53 +180,91 @@ class ConceptPlateFetcher(KLineFetcher):
                 "name": raw["StockName"][i] if i < len(raw["StockName"]) else "",
                 "market": raw["MarketSN"][i] if i < len(raw["MarketSN"]) else None,
             }
-            if i < len(raw.get("QuoteLast") or []):
-                row["price"] = self._convert_price(raw["QuoteLast"][i])
-            if i < len(raw.get("PxChg") or []):
-                row["change"] = self._convert_price(raw["PxChg"][i])
-            if i < len(raw.get("PxChgPct") or []):
-                row["change_pct"] = self._convert_ratio(raw["PxChgPct"][i])
-            if with_high_low:
-                if i < len(raw.get("High") or []):
-                    row["high"] = self._convert_price(raw["High"][i])
-                if i < len(raw.get("Low") or []):
-                    row["low"] = self._convert_price(raw["Low"][i])
+            if include_all_plate_fields:
+                # 10007 固定返回全部 27 个普通标量字段；缺列/短列/空值统一为 None，
+                # 使库和 Skill 的 JSON schema 在不同板块及交易时段保持稳定。
+                for output_name, field in PLATE_SORT_FIELDS.items():
+                    present, value = self._get_plate_field_value(raw, i, field)
+                    row[output_name] = value if present else None
+            else:
+                # 成份股等既有调用继续保持紧凑、可选字段的兼容结构。
+                output_names = ["price", "change", "change_pct"]
+                if with_high_low:
+                    output_names.extend(("high", "low"))
+                required_fields = set(additional_fields or ())
+                output_names.extend(required_fields)
+                for output_name in dict.fromkeys(output_names):
+                    field = PLATE_SORT_FIELDS[output_name]
+                    present, value = self._get_plate_field_value(raw, i, field)
+                    if present or output_name in required_fields:
+                        row[output_name] = value if present else None
             rows.append(row)
         return rows
 
-    def get_all_concept_plates(self, limit: Optional[int] = None, page_size: int = PLATE_LIST_PAGE_MAX) -> Optional[List[Dict]]:
-        """获取所有概念板块列表（自动翻页全量）。
+    def get_all_plates(self, plate_type: str = "concept", limit: Optional[int] = None,
+                       page_size: int = PLATE_LIST_PAGE_MAX, *,
+                       sort_by: str = "change_pct",
+                       direction: str = "desc") -> Optional[List[Dict]]:
+        """获取沪深指定类型的板块列表（Action=10007，自动翻页）。
 
-        v1.1.0 起按 ``start`` 翻页聚合全部板块（实测总数约 390，单页上限 100，
-        共 4 页请求）；v1.0.x 仅返回按涨跌幅排序的前 30 条。
+        ``plate_type`` 映射：industry=0 / concept=1 / region=2 / style=3；
+        市场固定为 44。``sort_by`` 使用 ``PLATE_SORT_FIELDS`` 中的稳定英文键，
+        ``direction`` 支持 asc/desc。按 ``start`` 翻页，单页上限 100。
 
         参数:
-            limit (int, optional): 最多返回的板块数，None 表示全量。
+            plate_type (str): industry/concept/region/style，默认 concept。
+            limit (int, optional): 最多返回的板块数，必须为正整数；None 表示全量。
             page_size (int, optional): 每页请求条数（API 上限 100）。
+            sort_by (str, keyword-only): 排序字段，默认 change_pct。
+            direction (str, keyword-only): asc 升序 / desc 降序，默认 desc。
 
         返回值:
-            Optional[List[Dict]]: 概念板块列表，每项包含：
+            Optional[List[Dict]]: 板块列表，每项包含：
                 - code (str): 板块代码
                 - name (str): 板块名称
-                - market (int): 市场代码（44 表示概念板块市场）
-                - price (float, optional): 最新点位（点，已换算）
-                - change (float, optional): 涨跌（点，已换算）
-                - change_pct (float, optional): 涨跌幅（%，已换算）
-            首页请求失败返回 None；翻页中途失败返回已获取部分（并告警）。
+                - market (int): 市场代码（44 表示沪深板块市场）
+                - ``PLATE_SORT_FIELDS`` 定义的 27 个普通标量字段（已换算）
+                  缺失值为 None；906 关联列表不解析、不返回
+            非 strict 模式下首页请求失败返回 None；翻页中途失败返回已获取部分。
+            strict=True 时请求失败抛 TZTError，避免把部分结果误认为全量。
         """
+        if not isinstance(plate_type, str):
+            raise ValueError("plate_type 必须是 industry/concept/region/style")
+        plate_type = plate_type.lower().strip()
+        if plate_type not in PLATE_TYPE_TO_SUBTYPE:
+            choices = ", ".join(PLATE_TYPE_ORDER)
+            raise ValueError(f"无效的 plate_type: {plate_type}，可选值: {choices}")
+        if not isinstance(page_size, int) or isinstance(page_size, bool) or not 1 <= page_size <= PLATE_LIST_PAGE_MAX:
+            raise ValueError(f"page_size 必须是 1 到 {PLATE_LIST_PAGE_MAX} 之间的整数")
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+                raise ValueError("limit 必须是正整数或 None")
+        if not isinstance(sort_by, str):
+            raise ValueError("sort_by 必须是排序字段的英文键")
+        sort_by = sort_by.lower().strip()
+        if sort_by not in PLATE_SORT_FIELDS:
+            choices = ", ".join(PLATE_SORT_FIELDS)
+            raise ValueError(f"无效的 sort_by: {sort_by}，可选值: {choices}")
+        if not isinstance(direction, str):
+            raise ValueError("direction 必须是 asc 或 desc")
+        direction = direction.lower().strip()
+        if direction not in PLATE_SORT_DIRECTIONS:
+            raise ValueError(f"无效的 direction: {direction}，可选值: asc, desc")
+        sort_field = PLATE_SORT_FIELDS[sort_by]
+
         kline_cfg = self.config.get("kline", {})
         base_params = {
             "Action": 10007,
             "needtitle": 1,
-            "subtype": 1,
+            "subtype": PLATE_TYPE_TO_SUBTYPE[plate_type],
             "rights": kline_cfg.get("rights", 0),
-            "direction": 1,
-            "906.props": "0|2|10|514",
-            "count": min(page_size, PLATE_LIST_PAGE_MAX),
+            "direction": PLATE_SORT_DIRECTIONS[direction],
+            "906.props": "0|1|2|10|514",
+            "count": page_size,
             "groups": "HQ_StockInfo|HQ_StockProp",
-            "sort": 514,
-            "props": "10|510|514|573|4|575|5|574|6|576|7|577|12|13|21|551|513|521|23|906|751|752|753|754|755|756|757|11",
-            "market": 44,
+            "sort": sort_field.prop_id,
+            "props": "|".join(str(prop_id) for prop_id in PLATE_LIST_PROPS),
+            "market": PLATE_MARKET,
             "Route": kline_cfg.get("route", 1),
         }
 
@@ -110,23 +273,29 @@ class ConceptPlateFetcher(KLineFetcher):
         while True:
             page_params = dict(base_params)
             page_params["start"] = start
+            if limit is not None:
+                page_params["count"] = min(page_size, limit - len(plates))
             raw = self._request(page_params)
             if raw is None:
                 if not plates:
                     return None
                 self.logger.warning(
-                    f"Plate list pagination failed at start={start}; "
+                    f"{plate_type} plate pagination failed at start={start}; "
                     f"returning {len(plates)} plates collected so far"
                 )
                 break
 
-            page_rows = self._parse_quote_rows(raw)
+            page_rows = self._parse_quote_rows(
+                raw,
+                include_all_plate_fields=True,
+            )
             if not page_rows:
                 break
             plates.extend(page_rows)
             total = raw.get("max")
             self.logger.info(
-                f"Fetched concept plates page: +{len(page_rows)}, total collected={len(plates)}, api max={total}"
+                f"Fetched {plate_type} plates page: +{len(page_rows)}, "
+                f"total collected={len(plates)}, api max={total}"
             )
 
             start += len(page_rows)
@@ -139,8 +308,21 @@ class ConceptPlateFetcher(KLineFetcher):
 
         if limit is not None:
             plates = plates[:limit]
-        self.logger.info(f"Fetched {len(plates)} concept plates in total")
+        self.logger.info(f"Fetched {len(plates)} {plate_type} plates in total")
         return plates
+
+    def get_all_concept_plates(self, limit: Optional[int] = None,
+                               page_size: int = PLATE_LIST_PAGE_MAX, *,
+                               sort_by: str = "change_pct",
+                               direction: str = "desc") -> Optional[List[Dict]]:
+        """兼容入口：获取全部沪深概念板块（等价于 get_all_plates("concept")）。"""
+        return self.get_all_plates(
+            "concept",
+            limit=limit,
+            page_size=page_size,
+            sort_by=sort_by,
+            direction=direction,
+        )
 
     def get_concept_plate_kline(self, plate_code: str, count: int = -220, market: int = 44) -> Optional[List[Dict]]:
         """获取指定概念板块的日K线数据。
@@ -202,21 +384,45 @@ class ConceptPlateFetcher(KLineFetcher):
         return self._fetch_trend_raw(plate_code, date=date_int, daycount=daycount,
                                      market=44, label=f"plate {plate_code}")
 
-    def get_concept_plate_stocks(self, plate_code: str, start: int = 0, count: int = 10) -> Optional[List[Dict]]:
+    def get_concept_plate_stocks(self, plate_code: str, start: int = 0,
+                                 count: int = 10, *,
+                                 sort_by: str = "change_pct",
+                                 direction: str = "desc") -> Optional[List[Dict]]:
         """获取指定概念板块的成份股列表（单页，含板块自身）。
 
         参数:
             plate_code (str): 概念板块代码，例如 "994612"
             start (int, optional): 分页起始位置，从 0 开始。默认值为 0。
             count (int, optional): 每页获取的股票数量。默认值为 10。
+            sort_by (str, keyword-only): 排序字段，使用 MEMBER_SORT_FIELDS 的
+                稳定英文键，默认 change_pct。
+            direction (str, keyword-only): asc 升序 / desc 降序，默认 desc。
 
         返回值:
             Optional[List[Dict]]: 成份股列表，每个股票包含 code/name/market
             及可选的 price/change/change_pct/high/low（v1.1.0 起已换算：价格类
-            为元、change_pct 为 %）。⚠️ 因固定 ``block.include=1``，**首项为
+            为元、change_pct 为 %）；若排序字段不在基础字段中，会追加对应的
+            已换算具名字段，不返回 ``sort_value``。⚠️ 因固定 ``block.include=1``，**首项为
             板块自身**（market=44），其后才是成份股（见 docs/concept_plate_api.md §3.3）。
             请求失败返回 None。
         """
+        if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+            raise ValueError("start 必须是非负整数")
+        if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= PLATE_LIST_PAGE_MAX:
+            raise ValueError(f"count 必须是 1 到 {PLATE_LIST_PAGE_MAX} 之间的整数")
+        if not isinstance(sort_by, str):
+            raise ValueError("sort_by 必须是排序字段的英文键")
+        sort_by = sort_by.lower().strip()
+        if sort_by not in MEMBER_SORT_FIELDS:
+            choices = ", ".join(MEMBER_SORT_FIELDS)
+            raise ValueError(f"无效的 sort_by: {sort_by}，可选值: {choices}")
+        if not isinstance(direction, str):
+            raise ValueError("direction 必须是 asc 或 desc")
+        direction = direction.lower().strip()
+        if direction not in PLATE_SORT_DIRECTIONS:
+            raise ValueError(f"无效的 direction: {direction}，可选值: asc, desc")
+        sort_field = MEMBER_SORT_FIELDS[sort_by]
+
         kline_cfg = self.config.get("kline", {})
         params = {
             "Action": 10005,
@@ -225,12 +431,12 @@ class ConceptPlateFetcher(KLineFetcher):
             "needtitle": 1,
             "rights": kline_cfg.get("rights", 0),
             "block": plate_code,
-            "direction": 1,
+            "direction": PLATE_SORT_DIRECTIONS[direction],
             "start": start,
             "count": count,
             "groups": "HQ_StockInfo|HQ_StockProp",
-            "sort": 514,
-            "props": "710|560|514|10|4|6|7|60|61|62|11|510|711",
+            "sort": sort_field.prop_id,
+            "props": "|".join(str(prop_id) for prop_id in MEMBER_LIST_PROPS),
             "Route": kline_cfg.get("route", 1),
             "routemarkets": 44,
         }
@@ -238,11 +444,18 @@ class ConceptPlateFetcher(KLineFetcher):
         raw = self._request(params)
         if raw is None:
             return None
-        stocks = self._parse_quote_rows(raw, with_high_low=True)
+        stocks = self._parse_quote_rows(
+            raw,
+            with_high_low=True,
+            additional_fields=(sort_by,),
+        )
         self.logger.info(f"Fetched {len(stocks)} stocks for plate {plate_code}")
         return stocks
 
-    def iter_concept_plate_stocks(self, plate_code: str, page_size: int = PLATE_LIST_PAGE_MAX) -> Iterator[Dict]:
+    def iter_concept_plate_stocks(self, plate_code: str,
+                                  page_size: int = PLATE_LIST_PAGE_MAX, *,
+                                  sort_by: str = "change_pct",
+                                  direction: str = "desc") -> Iterator[Dict]:
         """生成器：自动翻页产出板块**全部成份股**（过滤板块自身，v1.1.0 新增）。
 
         按 start/count 循环翻页直至短页；每页剔除 market=44 的板块自身行。
@@ -251,22 +464,35 @@ class ConceptPlateFetcher(KLineFetcher):
         参数:
             plate_code (str): 概念板块代码，例如 "994612"
             page_size (int, optional): 每页请求条数，默认 100。
+            sort_by (str, keyword-only): 排序字段，默认 change_pct。
+            direction (str, keyword-only): asc 升序 / desc 降序，默认 desc。
 
         Yields:
             Dict: 成份股行（同 get_concept_plate_stocks 的单行结构，单位已换算）。
         """
+        if not isinstance(page_size, int) or isinstance(page_size, bool) or not 1 <= page_size <= PLATE_LIST_PAGE_MAX:
+            raise ValueError(f"page_size 必须是 1 到 {PLATE_LIST_PAGE_MAX} 之间的整数")
         start = 0
         while True:
-            batch = self.get_concept_plate_stocks(plate_code, start=start, count=page_size)
+            batch = self.get_concept_plate_stocks(
+                plate_code,
+                start=start,
+                count=page_size,
+                sort_by=sort_by,
+                direction=direction,
+            )
             if not batch:
                 return
-            for stock in batch:
-                if stock.get("market") == 44:
-                    continue  # block.include=1 使首项为板块自身，剔除
+            member_rows = [
+                stock for stock in batch
+                if str(stock.get("market")) != str(PLATE_MARKET)
+            ]
+            for stock in member_rows:
                 yield stock
-            if len(batch) < page_size:
+            if len(member_rows) < page_size:
                 return  # 短页 = 末页
-            start += len(batch)
+            # block.include=1 会额外返回板块自身；start 只按真实成份股数推进。
+            start += len(member_rows)
 
     # 股票所属板块的关联属性 ID（《行情3.0股票属性ID》v1.229）：
     #   900 = CoIndBlkIdx 隶属行业板块指数（仅 1 条）

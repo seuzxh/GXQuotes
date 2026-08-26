@@ -1,6 +1,6 @@
 # GXQuotes（tzt-api）
 
-中焯行情 3.0 API 的 Python 客户端，专注封装 A 股行情接口：日K / 分钟K / 概念板块 / 分时（集合竞价 + 盘中）。零 numpy 依赖，仅 requests + PyYAML。
+中焯行情 3.0 API 的 Python 客户端，专注封装 A 股行情接口：日K / 分钟K / 行业、概念、地域、风格板块 / 分时（集合竞价 + 盘中）。零 numpy 依赖，仅 requests + PyYAML。
 
 > 仓库名 `GXQuotes`，Python 发行名为 `tzt-api`（`pip install` / `import tzt_api`）——两者指向同一包。
 > 本仓库自 [kline-fetcher](https://github.com/seuzxh/kline-fetcher) monorepo 拆分而来（extracted from kline-fetcher@9b9613c）；qlib 数据管道（下载编排 + bin 格式转换）在 kline-fetcher 仓库的 `kline-qlib` 包，依赖本包。
@@ -35,8 +35,13 @@ kline = fetcher.fetch_day_kline_with_factor("600519", begindate="20240101", endd
 mf = MinKLineFetcher()                   # 分钟K（继承 KLineFetcher）
 bars = mf.fetch_min_kline("sz000001", freq="5min", count=-1500)   # 深市裸 000xxx 需前缀（见下节）
 
-pf = ConceptPlateFetcher()               # 概念板块（继承 KLineFetcher）
-plates = pf.get_all_concept_plates()
+pf = ConceptPlateFetcher()               # 板块（继承 KLineFetcher）
+concepts = pf.get_all_concept_plates()   # 兼容入口
+industries = pf.get_all_plates("industry", limit=30)
+active_concepts = pf.get_all_plates(
+    "concept", limit=30, sort_by="amount", direction="desc"
+)  # 按成交额降序；每条带全部 27 个已换算标量 props 字段
+all_concepts = pf.get_all_plates("concept")  # None limit = 自动翻页取全量
 min_bars = pf.get_concept_plate_min_kline("994612", freq="5min", count=-240)  # 板块分钟K（v2.0.0）
 plate_trend = pf.get_concept_plate_trend("994612")                           # 板块分时（v2.0.0）
 
@@ -54,6 +59,8 @@ Agent/Skill 场景可直接用脚本（stdout 输出 JSON，退出码 0/2/3/4 �
 ```bash
 python skill/scripts/quotes.py resolve 贵州茅台          # 标的解析（代码/中文名/拼音）
 python skill/scripts/quotes.py dayk sh600519 --count -3  # 日K（歧义裸码自动复析，多候选 exit 3 反问）
+python skill/scripts/quotes.py plate-list --type concept --sort amount --direction desc --limit 30
+python skill/scripts/quotes.py members 994612 --sort amount --direction desc --limit 30
 python skill/scripts/quotes.py platek 994612 --freq 5min # 板块分钟K（platetrend 为板块分时）
 ```
 
@@ -90,11 +97,11 @@ GXQuotes/
 │   ├── _transport.py     # TZTClient 传输层：会话/进程级共享限流/重试/错误分类（v1.1.0+）
 │   ├── _base.py          # KLineFetcher 基类：组合 TZTClient + 单位换算 + 日K + 分钟K/分时共享实现
 │   ├── min_kline.py      # MinKLineFetcher：分钟K
-│   ├── concept_plate.py  # ConceptPlateFetcher：概念板块（列表/日K/分钟K/分时/成份股/归属）
+│   ├── concept_plate.py  # ConceptPlateFetcher：四类板块（列表/日K/分钟K/分时/成份股/归属）
 │   ├── trend.py          # TrendFetcher：分时
 │   ├── search.py         # SecurityResolver：10032 标的意图路由（v2.0.0）
 │   └── config/kline_config.yaml
-├── skill/                # 行情 Skill 交付：SKILL.md + scripts/quotes.py 八子命令（v2.0.0）
+├── skill/                # 行情 Skill 交付：SKILL.md + scripts/quotes.py 九子命令
 ├── tests/                # 单元 + 集成测试（conftest.py 共享 fixtures）
 └── docs/
     ├── README.md         # 文档索引

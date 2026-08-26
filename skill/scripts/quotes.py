@@ -8,8 +8,9 @@
   dayk        <代码> [--count N | --begin/--end] [--adjust qfq|hfq|none] [--factor]
   mink        <代码> --freq 1min|5min|15min|30min|60min [--count N] [--pages N]
   trend       <代码> [--date YYYYMMDD]                    分时（缺省当日）
+  plate-list  [--type ...] [--sort FIELD] [--direction asc|desc] [--limit N | --full]
   plates      <代码> [--type concept|industry|region]     个股所属板块
-  members     <板块代码> [--all]                          板块成份股（默认前 50）
+  members     <板块代码> [--sort FIELD] [--direction asc|desc] [--limit N | --all]
   platek      <板块代码> [--freq ...]                     板块日K（缺省）/分钟K（给 --freq）
   platetrend  <板块代码> [--date YYYYMMDD]                板块分时（缺省当日）
 依赖：tzt-api v2.0.0（pip install -e 本仓库，或仓库内直跑），KLINE_API_BASE_URL 环境变量。
@@ -19,6 +20,8 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
+from itertools import islice
 
 # 仓库内直跑支持：skill/scripts/ → 仓库根（tzt_api 所在处）
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -39,6 +42,13 @@ try:
         TZTError,
         UnknownCodeError,
     )
+    from tzt_api.concept_plate import (
+        PLATE_MARKET,
+        MEMBER_SORT_FIELDS,
+        PLATE_SORT_FIELDS,
+        PLATE_TYPE_ORDER,
+        PLATE_TYPE_TO_SUBTYPE,
+    )
     from tzt_api.market import MARKET_TO_PREFIX
 except ImportError:  # 环境缺依赖：给出可操作的指引而非 traceback
     print(json.dumps({"error": {
@@ -58,9 +68,21 @@ AMBIGUOUS_HINT = "多个候选，请指定"
 DAY_KLINE_DEFAULT_COUNT = -120   # 按需拉取：日K缺省约半年
 MIN_KLINE_DEFAULT_COUNT = -240   # 按需拉取：分钟K缺省约一个交易日（1min 口径）
 MEMBERS_DEFAULT_COUNT = 50       # members 缺省前 50 只（--all 全量）
+PLATE_LIST_DEFAULT_LIMIT = 30    # plate-list 缺省每类最多 30 个（--full 全量）
 
 # 显式市场前缀（sh/sz/bj 后跟数字；个股与指数共用命名空间，v2 契约）
 _EXPLICIT_PREFIX_RE = re.compile(r"^(?:sh|sz|bj)\d", re.IGNORECASE)
+
+
+def _positive_int(value: str, option: str) -> int:
+    """argparse 类型：只接受正整数，避免 Agent 无意产生无限/空查询。"""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{option} 必须是正整数") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"{option} 必须是正整数")
+    return parsed
 
 
 class _ScriptExit(Exception):
@@ -206,6 +228,69 @@ def cmd_trend(args):
     emit_ok(_require_data(_run_for_code(args.code, fetch, resolver), "分时"))
 
 
+def cmd_plate_list(args):
+    """获取行业/概念/地域/风格板块列表。
+
+    ``all`` 按固定类型顺序串行请求，输出仍为扁平列表，每行补充
+    ``type``，便于 Agent 后续筛选、排序和选取板块代码。
+    """
+    pf = ConceptPlateFetcher(strict=True)
+    limit = None if args.full else args.limit
+    retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if args.type != "all":
+        data = _require_data(
+            pf.get_all_plates(
+                args.type,
+                limit=limit,
+                sort_by=args.sort,
+                direction=args.direction,
+            ),
+            f"{args.type} 板块列表",
+        )
+        meta = {
+            "count": len(data),
+            "market": PLATE_MARKET,
+            "type": args.type,
+            "subtype": PLATE_TYPE_TO_SUBTYPE[args.type],
+            "full": args.full,
+            "sort": {"field": args.sort, "direction": args.direction},
+            "retrieved_at": retrieved_at,
+        }
+        if not args.full:
+            meta["limit"] = args.limit
+        emit_ok(data, meta=meta)
+
+    data = []
+    counts = {}
+    for plate_type in PLATE_TYPE_ORDER:
+        rows = _require_data(
+            pf.get_all_plates(
+                plate_type,
+                limit=limit,
+                sort_by=args.sort,
+                direction=args.direction,
+            ),
+            f"{plate_type} 板块列表",
+        )
+        counts[plate_type] = len(rows)
+        data.extend({**row, "type": plate_type} for row in rows)
+
+    meta = {
+        "count": len(data),
+        "market": PLATE_MARKET,
+        "type": "all",
+        "counts": counts,
+        "subtypes": dict(PLATE_TYPE_TO_SUBTYPE),
+        "full": args.full,
+        "sort": {"field": args.sort, "direction": args.direction},
+        "retrieved_at": retrieved_at,
+    }
+    if not args.full:
+        meta["limit_per_type"] = args.limit
+    emit_ok(data, meta=meta)
+
+
 def cmd_plates(args):
     pf, resolver = ConceptPlateFetcher(strict=True), SecurityResolver()
 
@@ -217,14 +302,46 @@ def cmd_plates(args):
 
 def cmd_members(args):
     pf = ConceptPlateFetcher(strict=True)
+    retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     if args.all:
-        data = list(pf.iter_concept_plate_stocks(args.plate))
+        data = list(pf.iter_concept_plate_stocks(
+            args.plate,
+            sort_by=args.sort,
+            direction=args.direction,
+        ))
+    elif args.limit <= 100:
+        # block.include=1 额外返回板块自身；count 本身仍表示成份股数量。
+        rows = pf.get_concept_plate_stocks(
+            args.plate,
+            start=0,
+            count=args.limit,
+            sort_by=args.sort,
+            direction=args.direction,
+        ) or []
+        data = [
+            row for row in rows
+            if str(row.get("market")) != str(PLATE_MARKET)
+        ][:args.limit]
     else:
-        # 多取 1 只补回 block.include=1 造成的板块自身占位，过滤后截断到 50
-        rows = pf.get_concept_plate_stocks(args.plate, start=0,
-                                           count=MEMBERS_DEFAULT_COUNT + 1) or []
-        data = [r for r in rows if str(r.get("market")) != "44"][:MEMBERS_DEFAULT_COUNT]
-    emit_ok(data)
+        # 10005 单页 count 上限 100；更大的有限排行使用同一排序口径分页并有界截取。
+        data = list(islice(
+            pf.iter_concept_plate_stocks(
+                args.plate,
+                sort_by=args.sort,
+                direction=args.direction,
+            ),
+            args.limit,
+        ))
+    meta = {
+        "count": len(data),
+        "plate": args.plate,
+        "full": args.all,
+        "sort": {"field": args.sort, "direction": args.direction},
+        "retrieved_at": retrieved_at,
+    }
+    if not args.all:
+        meta["limit"] = args.limit
+    emit_ok(data, meta=meta)
 
 
 def cmd_platek(args):
@@ -286,15 +403,69 @@ def build_parser():
     p.add_argument("--date", metavar="YYYYMMDD", help="历史日期（缺省当日）")
     p.set_defaults(func=cmd_trend)
 
+    p = sub.add_parser("plate-list", help="行业/概念/地域/风格板块列表")
+    p.add_argument(
+        "--type",
+        choices=(*PLATE_TYPE_ORDER, "all"),
+        default="concept",
+        help="板块类型（默认 concept；all 按固定顺序合并四类）",
+    )
+    p.add_argument(
+        "--sort",
+        choices=tuple(PLATE_SORT_FIELDS),
+        default="change_pct",
+        help="排序字段（默认 change_pct，完整含义见 SKILL.md 引用表）",
+    )
+    p.add_argument(
+        "--direction",
+        choices=("asc", "desc"),
+        default="desc",
+        help="升序 asc / 降序 desc（默认 desc）",
+    )
+    limit_group = p.add_mutually_exclusive_group()
+    limit_group.add_argument(
+        "--limit",
+        type=lambda value: _positive_int(value, "limit"),
+        default=PLATE_LIST_DEFAULT_LIMIT,
+        metavar="N",
+        help=f"最多返回 N 个（all 时为每类 N 个；默认 {PLATE_LIST_DEFAULT_LIMIT}）",
+    )
+    limit_group.add_argument("--full", action="store_true", help="自动翻页获取全量")
+    p.set_defaults(func=cmd_plate_list)
+
     p = sub.add_parser("plates", help="个股所属概念/行业/地域板块")
     p.add_argument("code", help="证券代码：sh600519 / 裸码（歧义自动复析）")
     p.add_argument("--type", choices=("concept", "industry", "region"),
                    help="板块类型过滤（缺省返回全部并带 type 字段）")
     p.set_defaults(func=cmd_plates)
 
-    p = sub.add_parser("members", help="板块成份股（默认前 50，--all 全量）")
+    p = sub.add_parser("members", help="板块成份股排行（默认涨幅降序前 50，--all 全量）")
     p.add_argument("plate", help="板块代码，如 994612（直传网关，不做标的解析）")
-    p.add_argument("--all", action="store_true", help="自动翻页拉取全部成份股")
+    p.add_argument(
+        "--sort",
+        choices=tuple(MEMBER_SORT_FIELDS),
+        default="change_pct",
+        help="排序字段（默认 change_pct，完整含义见 SKILL.md 引用表）",
+    )
+    p.add_argument(
+        "--direction",
+        choices=("asc", "desc"),
+        default="desc",
+        help="升序 asc / 降序 desc（默认 desc）",
+    )
+    member_limit_group = p.add_mutually_exclusive_group()
+    member_limit_group.add_argument(
+        "--limit",
+        type=lambda value: _positive_int(value, "limit"),
+        default=MEMBERS_DEFAULT_COUNT,
+        metavar="N",
+        help=f"最多返回 N 只（默认 {MEMBERS_DEFAULT_COUNT}）",
+    )
+    member_limit_group.add_argument(
+        "--all",
+        action="store_true",
+        help="自动翻页拉取全部成份股",
+    )
     p.set_defaults(func=cmd_members)
 
     p = sub.add_parser("platek", help="板块指数K线（缺省日K；给 --freq 则分钟K）")

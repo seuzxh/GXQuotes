@@ -11,6 +11,7 @@
 import pytest
 
 from tzt_api import ConceptPlateFetcher
+from tzt_api.concept_plate import PLATE_SORT_FIELDS
 
 pytestmark = pytest.mark.integration
 
@@ -32,12 +33,40 @@ class TestGetAllConceptPlates:
         plates = plate_fetcher.get_all_concept_plates(limit=5)
         assert plates is not None and len(plates) == 5
 
+    @pytest.mark.parametrize("plate_type", ["industry", "concept", "region", "style"])
+    def test_all_supported_plate_types(self, plate_fetcher, plate_type):
+        plates = plate_fetcher.get_all_plates(plate_type, limit=3)
+        assert plates is not None and len(plates) == 3
+        assert all(plate["market"] == 44 for plate in plates)
+
+    @pytest.mark.parametrize("sort_by,direction", [
+        ("change_pct", "asc"),
+        ("change_pct", "desc"),
+        ("price", "desc"),
+        ("volume", "desc"),
+        ("amount", "desc"),
+        ("volume_ratio", "desc"),
+        ("change_pct_3d", "desc"),
+    ])
+    def test_representative_sort_fields(self, plate_fetcher, sort_by, direction):
+        plates = plate_fetcher.get_all_plates(
+            "concept",
+            limit=3,
+            sort_by=sort_by,
+            direction=direction,
+        )
+        assert plates is not None and len(plates) == 3
+        values = [plate[sort_by] for plate in plates]
+        assert values == sorted(values, reverse=direction == "desc")
+        assert all("sort_value" not in plate for plate in plates)
+
     def test_fields_complete_and_market_44(self, plate_fetcher):
         plates = plate_fetcher.get_all_concept_plates()
         assert plates
         for plate in plates:
             for field in ("code", "name", "market"):
                 assert field in plate and plate[field] is not None
+            assert set(PLATE_SORT_FIELDS).issubset(plate)
             assert plate["market"] == 44
 
     def test_snapshot_units_self_consistency(self, plate_fetcher):
@@ -86,6 +115,32 @@ class TestConceptPlateStocks:
                 assert 0 < s["price"] < 100000
             if "change_pct" in s:
                 assert -11 <= s["change_pct"] <= 11
+
+    @pytest.mark.parametrize("sort_by,direction", [
+        ("change_pct", "asc"),
+        ("change_pct", "desc"),
+        ("price", "desc"),
+        ("amount", "desc"),
+        ("turnover_rate", "desc"),
+        ("volume_ratio", "desc"),
+        ("change_pct_20d", "desc"),
+    ])
+    def test_representative_member_sort_fields(
+            self, plate_fetcher, sort_by, direction):
+        rows = plate_fetcher.get_concept_plate_stocks(
+            TEST_PLATE,
+            start=0,
+            count=10,
+            sort_by=sort_by,
+            direction=direction,
+        )
+        members = [row for row in rows if str(row.get("market")) != "44"]
+        values = [row[sort_by] for row in members if row.get(sort_by) is not None]
+
+        assert len(members) == 10
+        assert len(values) > 1
+        assert values == sorted(values, reverse=direction == "desc")
+        assert all("sort_value" not in row for row in members)
 
     def test_manual_pagination(self, plate_fetcher):
         page1 = plate_fetcher.get_concept_plate_stocks(TEST_PLATE, start=0, count=5)
