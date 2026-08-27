@@ -83,3 +83,19 @@ class TestSkillScript:
     def test_plate_min_kline(self):
         p = run("platek", "994612", "--freq", "5min", "--count", "-3")
         assert p.returncode == 0 and len(json.loads(p.stdout)["data"]) > 0
+
+    def test_market_rank_custom_scope_and_sort(self):
+        p = run(
+            "market-rank", "--scope", "all-a", "--sort", "change_pct",
+            "--direction", "desc", "--limit", "3",
+        )
+        assert p.returncode == 0
+        payload = json.loads(p.stdout)
+        assert payload["meta"]["scope"] == "all-a"
+        assert payload["meta"]["markettype"] == "JHSASH"
+        assert payload["meta"]["routemarkets"] == [0, 1, 103]
+        assert payload["meta"]["sort"] == {"field": "change_pct", "direction": "desc"}
+        assert len(payload["data"]) == 3
+        values = [row["change_pct"] for row in payload["data"]]
+        assert values == sorted(values, reverse=True)
+        assert all("order_ratio" in row and "outside_volume" in row for row in payload["data"])

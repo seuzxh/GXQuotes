@@ -324,9 +324,10 @@ class TestGetAllPlates:
 
 class TestGetConceptPlateStocksSort:
     def test_member_sort_registry_matches_numeric_props(self):
-        excluded = {43, 560, 60, 61, 62, 189}
+        excluded = {560, 60, 61, 62, 189}
 
-        assert len(MEMBER_LIST_PROPS) == 33
+        assert 43 not in MEMBER_LIST_PROPS
+        assert len(MEMBER_LIST_PROPS) == 32
         assert len(MEMBER_SORT_FIELDS) == 27
         assert MEMBER_SORT_FIELDS == PLATE_SORT_FIELDS
         assert {field.prop_id for field in MEMBER_SORT_FIELDS.values()} == (
@@ -369,6 +370,7 @@ class TestGetConceptPlateStocksSort:
         assert captured["sort"] == field.prop_id
         assert captured["direction"] == 1
         assert captured["props"] == "|".join(map(str, MEMBER_LIST_PROPS))
+        assert "|43|" not in f"|{captured['props']}|"
         assert rows[1][sort_by] == expected_by_type[field.value_type]
         assert "sort_value" not in rows[1]
 

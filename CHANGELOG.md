@@ -4,7 +4,21 @@
 
 ## [Unreleased]
 
+**优化**
+- Action 10005 成份股排行默认 `props` 移除未解析的完整盘中分时数组
+  `43 TrendOp`，显著降低响应体积、JSON解码与分页开销；公开方法签名、27个
+  排序字段、返回 schema 及 Skill `members` 行为保持不变
+
+## [2.1.0] - 2026-08-27
+
 **新增**
+- `MarketRankFetcher.get_market_rank()`：封装 `Action=10006` 市场个股排行；提供
+  京沪深A股、沪深A股、沪市、深市、北市、沪深主板、创业板七个内置证券池，
+  支持30个普通标量行情字段的服务端排序及升降序，返回固定30字段稳定 schema
+- `tzt_api.quote_fields`：把 10005/10006/10007 共用字段 ID、响应键与单位换算收敛为
+  单一事实源；10005/10007 原有27字段公共契约保持不变
+- 行情 Skill 新增 `market-rank` 子命令：支持 `--scope/--sort/--direction/--limit/--start`，
+  严格区分“全市场个股排行”“板块排行”和“板块成份股排行”；新增详细字段 reference
 - `ConceptPlateFetcher.get_all_plates()`：统一获取行业/概念/地域/风格板块，
   `plate_type` 分别映射 Action 10007 的 subtype 0/1/2/3，支持 `limit` 和自动翻页；
   新增 27 个普通标量字段的 `sort_by` 与 `direction=asc|desc`；返回行固定携带
@@ -20,6 +34,10 @@
   排序字段的已换算具名值，并修正 `block.include=1` 下全量分页推进偏移
 - 行情 Skill `members` 新增 `--sort/--direction/--limit`，与 `--all` 配合支持
   板块成份股排行；输出 `meta.sort/retrieved_at` 供 Agent 明确数据口径
+
+**验证**
+- 单元测试368项、真实网关集成测试200项全部通过；10006七个内置证券池及30个
+  排序字段均完成实测，Skill Release 包在隔离虚拟环境中通过启动冒烟
 
 ## [2.0.0] - 2026-08-25
 

@@ -1,4 +1,4 @@
-"""tzt-api：中焯行情 3.0 API 客户端（A股日K/分钟K/概念板块/分时）。
+"""tzt-api：中焯行情 3.0 API 客户端（A股K线/个股排行/板块/分时）。
 
 公开 API：
     KLineFetcher           — 基类（日K线 + 共享底座）
@@ -11,6 +11,8 @@
     MarketResolutionError / AmbiguousCodeError / UnknownCodeError
                            — v2 市场解析异常（market.py v2 契约，v2.0.0）
     SecurityResolver      — 10032 标的意图路由（search.py，unique/ambiguous/not_found/error）
+    MarketRankFetcher     — 10006 京沪深市场个股排行
+    MarketScope           — 10006 逻辑证券池与物理市场路由的显式契约
 
 市场规则（与 kline-qlib 共享的单一事实源）见 tzt_api.market。
 qlib 数据转换/下载见 kline-qlib 包。
@@ -30,6 +32,7 @@ from tzt_api.market import (
     UnknownCodeError,
 )
 from tzt_api.search import SecurityResolver
+from tzt_api.market_rank import MarketRankFetcher, MarketScope
 
 __all__ = [
     "KLineFetcher",
@@ -45,5 +48,7 @@ __all__ = [
     "AmbiguousCodeError",
     "UnknownCodeError",
     "SecurityResolver",
+    "MarketRankFetcher",
+    "MarketScope",
 ]
-__version__ = "2.0.0"
+__version__ = "2.1.0"

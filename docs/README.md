@@ -13,15 +13,16 @@
 
 ## API/ — 接口文档
 
-- [接口功能清单.md](API/接口功能清单.md) —— 已实现数据接口总览（13 个公开方法 + 传输层，方法/参数/返回字段/实测状态）
+- [接口功能清单.md](API/接口功能清单.md) —— 已实现数据接口总览（18 个公开方法 + 传输层，方法/参数/返回字段/实测状态）
 - [中焯官方文档/README.md](API/中焯官方文档/README.md) —— 官方资料导航（6 份解析版 + originals 原件，「查什么 → 读哪份」）
 - [concept_plate_api.md](API/concept_plate_api.md) —— 概念板块接口文档（参数/字段/单位/分页语义）
+- [market_rank_api.md](API/market_rank_api.md) —— Action 10006 市场个股排行（证券池/排序/字段/单位）
 - [概念板块请求API.md](API/概念板块请求API.md) —— 概念板块接口原始抓包记录（iOS 客户端）
 
 ## guide/ — 使用指南
 
 - [tztapi-agent.md](guide/tztapi-agent.md) —— 中焯接口智能体使用指南（新建/校验/咨询三类场景与铁律）
 
-## skill/ — 行情 Skill 交付（仓库根，v2.0.0）
+## skill/ — 行情 Skill 交付（仓库根，v2.1.0）
 
-- [../skill/SKILL.md](../skill/SKILL.md) —— agent skill 入口：九子命令（含四类板块 `plate-list`）、JSON 输出契约、退出码语义（0/2/3/4）、标的解析规则（显式前缀优先 / 裸码歧义反问）与安全铁律
+- [../skill/SKILL.md](../skill/SKILL.md) —— agent skill 入口：十个子命令（含四类板块 `plate-list` 与个股 `market-rank`）、JSON 输出契约、退出码语义（0/2/3/4）、标的解析规则与安全铁律

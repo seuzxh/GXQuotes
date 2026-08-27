@@ -3,9 +3,10 @@ name: gxquotes
 description: >
   A股行情数据技能：日K/分钟K（前/后/不复权 + 复权因子）、实时与历史分时、个股与
   主要指数、行业/概念/地域/风格板块列表、个股板块归属/成份股/板块指数
-  行情（日K + 分钟K + 分时）。触发词：行情、K线、分时、复权、指数、行业板块、
-  概念板块、地域板块、风格板块、成份股、板块。数据口径：价格/成交额=元、
-  成交量=股、涨跌幅=%。
+  行情（日K + 分钟K + 分时），以及京沪深A股/沪市/深市/北交所个股排行。
+  触发词：行情、K线、分时、复权、指数、涨幅榜、个股排行、行业板块、概念板块、
+  地域板块、风格板块、成份股、板块。数据口径：价格/成交额=元、成交量=股、
+  涨跌幅=%。
 ---
 
 # 行情 Skill（gxquotes）
@@ -20,7 +21,7 @@ description: >
   `export KLINE_API_BASE_URL="http://183.242.5.14:7778"`
   （或写入 `tzt_api/config/kline_config.yaml` 的 `api.base_url`）
 - Coze / GitHub Release 产物以 Python 3.11 为运行时目标，并在 `scripts/vendor/`
-  内携带 tzt-api v2.0.0、requests、PyYAML 等全部 Python 依赖，可直接执行；
+  内携带 tzt-api v2.1.0、requests、PyYAML 等全部 Python 依赖，可直接执行；
   tzt-api 库本身支持 Python ≥3.9。在 GXQuotes 仓库内开发时，脚本会优先加载仓库源码。
 
 ## 单位口径（全部子命令统一）
@@ -30,7 +31,7 @@ description: >
 - 成交量（volume）：**股**（非手）
 - 涨跌幅（change_pct）：**%**
 
-## 九个子命令（示例均可直接运行）
+## 十个子命令（示例均可直接运行）
 
 ### 1. resolve — 标的解析
 
@@ -141,6 +142,29 @@ python skill/scripts/quotes.py platetrend 994612
 
 exit 0 → 结构同 trend（`market_date/pre_market/trading`）；`--date YYYYMMDD` 取历史。
 
+### 10. market-rank — 市场个股排行
+
+```bash
+python skill/scripts/quotes.py market-rank --scope all-a --sort change_pct --direction desc --limit 50
+```
+
+exit 0 → `{"data": [{"code","symbol","name","market","market_name","<30个普通标量行情字段>"}], "meta": {"count","max","scope","markettype","routemarkets","start","limit","sort","retrieved_at"}}`
+
+- `--scope all-a|hs-a|sh-a|sz-a|bj-a|main|gem`：默认 `all-a`（京沪深A股）；
+  分别表示沪深A股、上证A股、深证A股、北证A股、沪深主板、创业板。
+- `--sort` 默认 `change_pct`，`--direction asc|desc` 默认 `desc`；字段含义、单位、
+  scope 映射见[市场个股排行字段](references/market-rank-fields.md)。
+- `--limit` 只能为 1–100，默认30；`--start` 默认0。10006是实时排行窗口，跨页
+  不是强一致快照，因此本命令不提供 `--all`。
+- 返回证券池默认包含新股、ST等符合市场类型的证券；不得把结果描述为“排除ST/新股”榜单。
+- 自然语言路由：
+  - “当前/A股/全市场/沪市/深市/北交所 + 个股/股票 + 排行” → `market-rank`；
+  - “涨幅前N只个股/跌幅前N只股票/涨幅最高N只/排名前N” → `market-rank`，
+    即使用户没有说“排行”或“榜”也应命中；
+  - “行业/概念/地域/风格板块排行” → `plate-list`（对象是板块）；
+  - “某板块内/成份股排行” → `members`（对象是板块内股票）。
+  对象仍不明确时先反问，不要用板块排行冒充个股排行。
+
 ## 标的解析规则（重要）
 
 1. **显式前缀优先**：优先让用户给出 `sh600519` / `sz000001` / `sh000300`（沪深300）/
@@ -177,6 +201,7 @@ exit 0 → 结构同 trend（`market_date/pre_market/trading`）；`--date YYYYM
   不要绕过库并发刷网关，也不要多进程并行狂拉。
 - **按需拉取**：优先给明确的 `--count/--begin/--end` 而非默认全量
   （默认 dayk -120 / mink -240）；板块列表默认每类 30，确需全量再 `--full`；
-  成份股默认前 50，确需全量再 `--all`。
+  成份股默认前 50，确需全量再 `--all`；市场个股排行默认前30且单次最多100，
+  不主动跨页抓取全市场。
 - **不复用超过当日的数据**：行情不是历史事实，分时/分钟K/快照随盘变化；
   跨日引用必须重新拉取，缓存至多当日有效。

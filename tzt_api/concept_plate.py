@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence
 
 from tzt_api._base import KLineFetcher
+from tzt_api.quote_fields import QUOTE_FIELD_REGISTRY, SORT_DIRECTIONS
 
 __all__ = [
     "PLATE_MARKET",
@@ -47,11 +48,11 @@ PLATE_LIST_PROPS = (
     551, 513, 521, 23, 906, 751, 752, 753, 754, 755, 756, 757, 11,
 )
 
-# 10005 成份股请求字段，顺序与 GXAPP 6.3.4 真实请求保持一致。
-# 43=完整盘中分时、560=连板字符串、60/61/62=板块涨跌平家数、189=交易分钟数；
-# 这些字段不适合作为成份股数值排行，因此 MEMBER_SORT_FIELDS 只取普通标量行情字段。
+# 10005 成份股快照字段：保留 GXAPP 6.3.4 真实请求顺序，但移除未消费且
+# 体量很大的 43=TrendOp 完整盘中分时数组。560=连板字符串、60/61/62=板块
+# 涨跌平家数、189=交易分钟数也不适合作为数值排行，MEMBER_SORT_FIELDS 只取标量字段。
 MEMBER_LIST_PROPS = (
-    43, 560, 10, 510, 514, 573, 4, 575, 5, 574, 6, 576, 7, 577,
+    560, 10, 510, 514, 573, 4, 575, 5, 574, 6, 576, 7, 577,
     12, 13, 21, 551, 513, 521, 23, 751, 752, 753, 754, 755, 756,
     757, 60, 61, 62, 11, 189,
 )
@@ -68,39 +69,23 @@ class PlateSortField:
     value_type: str
 
 
-# 映射依据：GXZQ tztZFPropField.json v1.0.20 + 中焯官方属性表。
-# 906=CoLeadStock 是关联 list，不属于普通标量 sort，故不放入注册表。
+# 由普通行情字段注册表投影出板块语境标签/单位；保留既有类型与常量名兼容。
+_PLATE_FIELD_NAMES = tuple(name for name in QUOTE_FIELD_REGISTRY if name not in {
+    "order_ratio", "order_diff", "outside_volume",
+})
 PLATE_SORT_FIELDS = {
-    "price": PlateSortField(10, "QuoteLast", "最新点位", "点", "price"),
-    "change": PlateSortField(510, "PxChg", "涨跌", "点", "price"),
-    "change_pct": PlateSortField(514, "PxChgPct", "涨跌幅", "%", "percentage"),
-    "change_speed_3m_pct": PlateSortField(573, "3MinPxChg", "3分钟涨速", "%", "percentage"),
-    "previous_close": PlateSortField(4, "PreClose", "昨收", "点", "price"),
-    "previous_change_pct": PlateSortField(575, "PrePxChgPct", "昨日涨跌幅", "%", "percentage"),
-    "open": PlateSortField(5, "Open", "今开", "点", "price"),
-    "open_change_pct": PlateSortField(574, "OpenPxChgPct", "开盘涨跌幅", "%", "percentage"),
-    "high": PlateSortField(6, "High", "最高", "点", "price"),
-    "high_change_pct": PlateSortField(576, "HighPxChgPct", "最高涨跌幅", "%", "percentage"),
-    "low": PlateSortField(7, "Low", "最低", "点", "price"),
-    "low_change_pct": PlateSortField(577, "LowPxChgPct", "最低涨跌幅", "%", "percentage"),
-    "volume": PlateSortField(12, "Volume", "总成交量", "股", "volume"),
-    "amount": PlateSortField(13, "Turnover", "总成交额", "元", "amount"),
-    "last_volume": PlateSortField(21, "NewVol", "现手", "股", "volume"),
-    "turnover_rate": PlateSortField(551, "TurnoverRate", "换手率", "%", "percentage"),
-    "amplitude": PlateSortField(513, "Amplitude", "振幅", "%", "percentage"),
-    "volume_ratio": PlateSortField(521, "VolRelRatio", "量比", "倍", "ratio"),
-    "inside_volume": PlateSortField(23, "Inside", "内盘", "股", "volume"),
-    "change_pct_3d": PlateSortField(751, "PxChgPct3TD", "3日涨幅", "%", "percentage"),
-    "change_pct_5d": PlateSortField(752, "PxChgPct5TD", "5日涨幅", "%", "percentage"),
-    "change_pct_10d": PlateSortField(753, "PxChgPct10TD", "10日涨幅", "%", "percentage"),
-    "change_pct_20d": PlateSortField(754, "PxChgPct20TD", "20日涨幅", "%", "percentage"),
-    "change_pct_60d": PlateSortField(755, "PxChgPct60TD", "60日涨幅", "%", "percentage"),
-    "change_pct_120d": PlateSortField(756, "PxChgPct120TD", "120日涨幅", "%", "percentage"),
-    "change_pct_250d": PlateSortField(757, "PxChgPct250TD", "250日涨幅", "%", "percentage"),
-    "reference_price": PlateSortField(11, "QuotePreClose", "报价基准价", "点", "price"),
+    name: PlateSortField(
+        field.prop_id,
+        field.raw_key,
+        field.plate_label or field.label,
+        field.plate_unit or field.stock_unit,
+        field.value_type,
+    )
+    for name in _PLATE_FIELD_NAMES
+    for field in (QUOTE_FIELD_REGISTRY[name],)
 }
 
-PLATE_SORT_DIRECTIONS = {"asc": 0, "desc": 1}
+PLATE_SORT_DIRECTIONS = SORT_DIRECTIONS
 
 # 10005 与 10007 共享同一套 27 个普通数值行情属性和稳定英文键。
 # 使用派生注册表避免协议 ID、单位换算在两个接口中出现双重事实源。

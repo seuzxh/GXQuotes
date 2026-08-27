@@ -13,7 +13,9 @@
   members     <板块代码> [--sort FIELD] [--direction asc|desc] [--limit N | --all]
   platek      <板块代码> [--freq ...]                     板块日K（缺省）/分钟K（给 --freq）
   platetrend  <板块代码> [--date YYYYMMDD]                板块分时（缺省当日）
-依赖：tzt-api v2.0.0（pip install -e 本仓库，或仓库内直跑），KLINE_API_BASE_URL 环境变量。
+  market-rank [--scope ...] [--sort FIELD] [--direction asc|desc] [--limit N]
+                                                             京沪深市场个股排行
+依赖：tzt-api v2.1.0（pip install -e 本仓库，或仓库内直跑），KLINE_API_BASE_URL 环境变量。
 """
 import argparse
 import json
@@ -41,6 +43,7 @@ try:
         KLineFetcher,
         MarketResolutionError,
         MinKLineFetcher,
+        MarketRankFetcher,
         SecurityResolver,
         TrendFetcher,
         TZTAPIError,
@@ -56,6 +59,11 @@ try:
         PLATE_TYPE_TO_SUBTYPE,
     )
     from tzt_api.market import MARKET_TO_PREFIX
+    from tzt_api.market_rank import (
+        MARKET_RANK_PAGE_MAX,
+        MARKET_RANK_SORT_FIELDS,
+        MARKET_SCOPES,
+    )
 except ImportError:  # 环境缺依赖：给出可操作的指引而非 traceback
     print(json.dumps({"error": {
         "kind": "dependency",
@@ -75,6 +83,7 @@ DAY_KLINE_DEFAULT_COUNT = -120   # 按需拉取：日K缺省约半年
 MIN_KLINE_DEFAULT_COUNT = -240   # 按需拉取：分钟K缺省约一个交易日（1min 口径）
 MEMBERS_DEFAULT_COUNT = 50       # members 缺省前 50 只（--all 全量）
 PLATE_LIST_DEFAULT_LIMIT = 30    # plate-list 缺省每类最多 30 个（--full 全量）
+MARKET_RANK_DEFAULT_LIMIT = 30   # market-rank 对齐真实 App 默认榜单条数
 
 # 显式市场前缀（sh/sz/bj 后跟数字；个股与指数共用命名空间，v2 契约）
 _EXPLICIT_PREFIX_RE = re.compile(r"^(?:sh|sz|bj)\d", re.IGNORECASE)
@@ -88,6 +97,23 @@ def _positive_int(value: str, option: str) -> int:
         raise argparse.ArgumentTypeError(f"{option} 必须是正整数") from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError(f"{option} 必须是正整数")
+    return parsed
+
+
+def _bounded_positive_int(value: str, option: str, maximum: int) -> int:
+    parsed = _positive_int(value, option)
+    if parsed > maximum:
+        raise argparse.ArgumentTypeError(f"{option} 不能超过 {maximum}")
+    return parsed
+
+
+def _nonnegative_int(value: str, option: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{option} 必须是非负整数") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError(f"{option} 必须是非负整数")
     return parsed
 
 
@@ -369,6 +395,33 @@ def cmd_platetrend(args):
     emit_ok(_require_data(pf.get_concept_plate_trend(args.plate, date=args.date), "板块分时"))
 
 
+def cmd_market_rank(args):
+    """获取指定市场范围的个股排行（Action=10006）。"""
+    fetcher = MarketRankFetcher(strict=True)
+    scope_key = args.scope.replace("-", "_")
+    data = _require_data(
+        fetcher.get_market_rank(
+            scope_key,
+            start=args.start,
+            count=args.limit,
+            sort_by=args.sort,
+            direction=args.direction,
+        ),
+        f"{args.scope} 市场排行",
+    )
+    retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    meta = dict(getattr(fetcher, "last_rank_meta", {}) or {})
+    meta.update({
+        "count": len(data),
+        "scope": args.scope,
+        "start": args.start,
+        "limit": args.limit,
+        "sort": {"field": args.sort, "direction": args.direction},
+        "retrieved_at": retrieved_at,
+    })
+    emit_ok(data, meta=meta)
+
+
 # ===== argparse =====
 
 def build_parser():
@@ -487,6 +540,41 @@ def build_parser():
     p.add_argument("plate", help="板块代码，如 994612（直传网关，不做标的解析）")
     p.add_argument("--date", metavar="YYYYMMDD", help="历史日期（缺省当日）")
     p.set_defaults(func=cmd_platetrend)
+
+    p = sub.add_parser("market-rank", help="京沪深市场个股排行（默认全A股涨幅降序前30）")
+    p.add_argument(
+        "--scope",
+        choices=tuple(key.replace("_", "-") for key in MARKET_SCOPES),
+        default="all-a",
+        help="证券池：全A股/沪深A股/沪市/深市/北市/沪深主板/创业板",
+    )
+    p.add_argument(
+        "--sort",
+        choices=tuple(MARKET_RANK_SORT_FIELDS),
+        default="change_pct",
+        help="排序字段（默认 change_pct，完整含义见 Skill reference）",
+    )
+    p.add_argument(
+        "--direction",
+        choices=("asc", "desc"),
+        default="desc",
+        help="升序 asc / 降序 desc（默认 desc）",
+    )
+    p.add_argument(
+        "--limit",
+        type=lambda value: _bounded_positive_int(value, "limit", MARKET_RANK_PAGE_MAX),
+        default=MARKET_RANK_DEFAULT_LIMIT,
+        metavar="N",
+        help=f"返回 N 只（1-{MARKET_RANK_PAGE_MAX}，默认 {MARKET_RANK_DEFAULT_LIMIT}）",
+    )
+    p.add_argument(
+        "--start",
+        type=lambda value: _nonnegative_int(value, "start"),
+        default=0,
+        metavar="N",
+        help="排行起始偏移（默认 0）",
+    )
+    p.set_defaults(func=cmd_market_rank)
 
     return parser
 

@@ -1,6 +1,6 @@
 # GXQuotes（tzt-api）
 
-中焯行情 3.0 API 的 Python 客户端，专注封装 A 股行情接口：日K / 分钟K / 行业、概念、地域、风格板块 / 分时（集合竞价 + 盘中）。零 numpy 依赖，仅 requests + PyYAML。
+中焯行情 3.0 API 的 Python 客户端，专注封装 A 股行情接口：日K / 分钟K / 市场个股排行 / 行业、概念、地域、风格板块 / 分时（集合竞价 + 盘中）。零 numpy 依赖，仅 requests + PyYAML。
 
 > 仓库名 `GXQuotes`，Python 发行名为 `tzt-api`（`pip install` / `import tzt_api`）——两者指向同一包。
 > 本仓库自 [kline-fetcher](https://github.com/seuzxh/kline-fetcher) monorepo 拆分而来（extracted from kline-fetcher@9b9613c）；qlib 数据管道（下载编排 + bin 格式转换）在 kline-fetcher 仓库的 `kline-qlib` 包，依赖本包。
@@ -27,7 +27,7 @@ pip install -e ./GXQuotes
 
 ```python
 from tzt_api import (KLineFetcher, MinKLineFetcher, ConceptPlateFetcher,
-                     TrendFetcher, SecurityResolver)
+                     MarketRankFetcher, TrendFetcher, SecurityResolver)
 
 fetcher = KLineFetcher()                 # 日K + 共享底座
 kline = fetcher.fetch_day_kline_with_factor("600519", begindate="20240101", enddate="20241231")
@@ -52,6 +52,11 @@ resolver = SecurityResolver()            # 标的意图路由（10032，v2.0.0�
 resolver.resolve("平安银行")             # → {"status": "unique", "chosen": {code, name, market, is_index}}
 resolver.resolve("000001")               # → {"status": "ambiguous", "candidates": [平安银行(sz), 上证指数(sh)]}
 resolver.resolve("000001", prefer="index")  # 意图过滤 → 唯一命中上证指数
+
+ranker = MarketRankFetcher()             # 市场个股排行（10006）
+top_gainers = ranker.get_market_rank(
+    "all_a", count=30, sort_by="change_pct", direction="desc"
+)  # 每条固定带全部 30 个已换算行情字段
 ```
 
 Agent/Skill 场景可直接用脚本（stdout 输出 JSON，退出码 0/2/3/4 表语义）：
@@ -62,6 +67,7 @@ python skill/scripts/quotes.py dayk sh600519 --count -3  # 日K（歧义裸码�
 python skill/scripts/quotes.py plate-list --type concept --sort amount --direction desc --limit 30
 python skill/scripts/quotes.py members 994612 --sort amount --direction desc --limit 30
 python skill/scripts/quotes.py platek 994612 --freq 5min # 板块分钟K（platetrend 为板块分时）
+python skill/scripts/quotes.py market-rank --scope all-a --sort change_pct --direction desc --limit 50
 ```
 
 ## 标的解析（v2 显式契约，重要）
@@ -98,10 +104,12 @@ GXQuotes/
 │   ├── _base.py          # KLineFetcher 基类：组合 TZTClient + 单位换算 + 日K + 分钟K/分时共享实现
 │   ├── min_kline.py      # MinKLineFetcher：分钟K
 │   ├── concept_plate.py  # ConceptPlateFetcher：四类板块（列表/日K/分钟K/分时/成份股/归属）
+│   ├── quote_fields.py   # 普通行情字段 ID、响应键、单位换算的共享事实
+│   ├── market_rank.py    # MarketRankFetcher：10006 京沪深市场个股排行
 │   ├── trend.py          # TrendFetcher：分时
 │   ├── search.py         # SecurityResolver：10032 标的意图路由（v2.0.0）
 │   └── config/kline_config.yaml
-├── skill/                # 行情 Skill 交付：SKILL.md + scripts/quotes.py 九子命令
+├── skill/                # 行情 Skill 交付：SKILL.md + scripts/quotes.py 十个子命令
 ├── tests/                # 单元 + 集成测试（conftest.py 共享 fixtures）
 └── docs/
     ├── README.md         # 文档索引
@@ -126,6 +134,7 @@ KLINE_API_BASE_URL=<地址> pytest -m integration   # 集成测试（需真实 A
 - [docs/API/接口功能清单.md](docs/API/接口功能清单.md) —— 已实现数据接口总览（方法/参数/返回字段/实测状态）
 - [docs/API/中焯官方文档/README.md](docs/API/中焯官方文档/README.md) —— 官方资料导航（查什么 → 读哪份）
 - [docs/API/concept_plate_api.md](docs/API/concept_plate_api.md) —— 概念板块接口文档
+- [docs/API/market_rank_api.md](docs/API/market_rank_api.md) —— 10006 市场个股排行接口文档
 - [docs/guide/tztapi-agent.md](docs/guide/tztapi-agent.md) —— 接口智能体使用指南
 
 ## 变更记录
