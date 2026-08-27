@@ -4,11 +4,6 @@
 
 ## [Unreleased]
 
-**优化**
-- Action 10005 成份股排行默认 `props` 移除未解析的完整盘中分时数组
-  `43 TrendOp`，显著降低响应体积、JSON解码与分页开销；公开方法签名、27个
-  排序字段、返回 schema 及 Skill `members` 行为保持不变
-
 ## [2.1.0] - 2026-08-27
 
 **新增**
@@ -34,6 +29,11 @@
   排序字段的已换算具名值，并修正 `block.include=1` 下全量分页推进偏移
 - 行情 Skill `members` 新增 `--sort/--direction/--limit`，与 `--all` 配合支持
   板块成份股排行；输出 `meta.sort/retrieved_at` 供 Agent 明确数据口径
+
+**优化**
+- Action 10005 成份股排行默认 `props` 移除未解析的完整盘中分时数组
+  `43 TrendOp`，显著降低响应体积、JSON解码与分页开销；公开方法签名、27个
+  排序字段、返回 schema 及 Skill `members` 行为保持不变
 
 **验证**
 - 单元测试368项、真实网关集成测试200项全部通过；10006七个内置证券池及30个
