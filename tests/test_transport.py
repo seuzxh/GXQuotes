@@ -100,6 +100,21 @@ class TestRequestRetries:
         assert len(client.session.calls) == 3  # max_retries=3
         assert isinstance(client.last_error, TZTConnectionError)
 
+    def test_network_error_does_not_leak_gateway(self, caplog):
+        secret_url = "http://secret-internal-gateway.example:7778"
+        client = make_client({"base_url": secret_url})
+        client.session = FakeSession([
+            requests.ConnectionError(f"cannot connect to {secret_url}")
+        ] * 3)
+
+        with caplog.at_level(logging.WARNING):
+            result = client.request({"Action": 10002})
+
+        assert result is None
+        assert secret_url not in str(client.last_error)
+        assert secret_url not in caplog.text
+        assert str(client.last_error) == "行情网关连接失败"
+
     def test_api_error_retries_then_none(self):
         client = make_client()
         client.session = FakeSession([{"ErrorNo": "-989903", "ErrorMessage": "未知功能"}] * 3)

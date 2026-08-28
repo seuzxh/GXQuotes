@@ -24,11 +24,11 @@ GXQUOTES_SKILL_DIR="/absolute/path/to/installed/gxquotes"
 
 ## 环境要求
 
-- 环境变量 `KLINE_API_BASE_URL`（必配，行情网关地址）。未配置时脚本 exit 4，
-  `error.message` 附配置指引。配置方式：
-  `export KLINE_API_BASE_URL="http://183.242.5.14:7778"`
-  若改用 YAML 配置文件，请通过 `KLINE_CONFIG_PATH` 指向该文件的绝对路径；不要依赖
-  源码仓库或 Skill 安装目录中的固定配置路径。
+- Release Skill 包已携带内部默认配置，可直接运行。管理员可通过 `KLINE_API_BASE_URL`
+  覆盖默认网关，或通过 `KLINE_CONFIG_PATH` 指向另一份配置文件；普通查询不要读取、
+  打印或复述这些配置。
+- 不得在回答、命令展示、错误说明或日志摘要中输出网关地址、IP、端口、完整请求 URL
+  或配置文件内容。连接失败时只说明“行情服务暂时不可用”，并建议联系行情服务管理员。
 - Coze / GitHub Release 产物以 Python 3.11 为运行时目标，并在 `scripts/vendor/`
   内携带 tzt-api v2.1.0、requests、PyYAML 等全部 Python 依赖，可直接执行；
   tzt-api 库本身支持 Python ≥3.9。在 GXQuotes 仓库内开发时，脚本会优先加载仓库源码。
@@ -199,13 +199,13 @@ exit 0 → `{"data": [{"code","symbol","name","market","market_name","<30个普�
 | 0 | 成功 | `{"data": ..., "meta": {"count": N}}` | 直接使用数据 |
 | 2 | 未找到标的 / 网关无数据 | `{"error": {"kind": "not_found", ...}}` | 换代码或名称重试，可先 resolve |
 | 3 | 歧义 | `{"candidates": [...], "hint": "多个候选，请指定"}` | 向用户列出候选反问，选定后带 sh/sz/bj 前缀重试 |
-| 4 | 网关/配置/网络错误 | `{"error": {"kind": "config/network/gateway/...", "message", "actionable"}}` | 按 actionable 排查（KLINE_API_BASE_URL、网络）后重试 |
+| 4 | 网关/配置/网络错误 | `{"error": {"kind": "config/network/gateway/...", "message", "actionable"}}` | 按 actionable 联系行情服务管理员排查 |
 
 注：argparse 用法错误（缺参数/非法选项）也走 exit 2，但 stderr 有 usage 文本、stdout 无 JSON——与 not_found 靠 stdout 是否有 JSON 区分。
 
 ## 安全铁律
 
-- **只读 GET**：全部请求均为 `GET {KLINE_API_BASE_URL}/reqxml` 查询，无任何写操作。
+- **只读 GET**：全部请求均通过内部配置的行情网关查询，无任何写操作；不得展示网关地址。
 - **限流铁律**：对网关请求间隔 **≥0.1s**（库内进程级共享限流自动保证）；
   不要绕过库并发刷网关，也不要多进程并行狂拉。
 - **按需拉取**：优先给明确的 `--count/--begin/--end` 而非默认全量

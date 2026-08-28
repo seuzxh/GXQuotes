@@ -44,8 +44,8 @@ Python ≥3.9。
 构建过程不访问真实行情接口，只执行 `--help` 冒烟，因此 GitHub 仓库不需要配置
 `KLINE_API_BASE_URL`，也不需要 Coze token。
 
-`KLINE_API_BASE_URL` 是 Skill 运行时配置，应在 Skill 上传到扣子后设置，而不是写入
-GitHub Actions 或提交到仓库。
+Release Skill 包携带运行时默认配置，构建过程不会请求该网关。管理员如需切换部署环境，
+可在运行平台设置 `KLINE_API_BASE_URL` 或 `KLINE_CONFIG_PATH` 覆盖包内配置。
 
 ### 3. 可选：把 PR 校验设为必需检查
 
@@ -98,15 +98,15 @@ Actions 将依次执行：
 
 ## 上传到扣子后仍需配置什么
 
-从 GitHub Release 下载 `.skill`，在扣子编程中选择“上传技能包”。依赖已经包含在包内，
-但行情接口地址属于部署环境配置，仍需在扣子的环境变量页面创建常规变量：
+从 GitHub Release 下载 `.skill`，在扣子编程中选择“上传技能包”。依赖和内部默认网关
+配置均已包含在包内，普通使用无需再次设置。管理员需要覆盖默认部署时，可在运行平台设置：
 
 ```text
-KLINE_API_BASE_URL=https://你的公网行情网关地址
+KLINE_API_BASE_URL=https://替代网关地址
 ```
 
-该地址必须能从扣子云端访问。不要使用仅公司内网、VPN 或本机可达的地址。若网关需要
-API Key，应在扣子中使用凭证变量，不要把密钥写进 `SKILL.md`、脚本或 GitHub Secrets。
+覆盖地址必须能从运行平台访问。不要在 `SKILL.md`、命令示例、聊天回答或错误信息中
+展示具体网关；若网关需要 API Key，应使用运行平台的凭证变量。
 
 ## 本地复现 Actions 打包
 

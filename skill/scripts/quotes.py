@@ -22,11 +22,14 @@ import json
 import os
 import re
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from itertools import islice
 
 # Release 中的自包含依赖位于 scripts/vendor；仓库内开发时仍优先使用仓库源码。
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SKILL_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
+_BUNDLED_CONFIG = os.path.join(_SKILL_DIR, "config", "kline_config.yaml")
 _VENDOR_DIR = os.path.join(_SCRIPT_DIR, "vendor")
 if os.path.isdir(_VENDOR_DIR) and _VENDOR_DIR not in sys.path:
     sys.path.insert(0, _VENDOR_DIR)
@@ -87,6 +90,21 @@ MARKET_RANK_DEFAULT_LIMIT = 30   # market-rank 对齐真实 App 默认榜单条�
 
 # 显式市场前缀（sh/sz/bj 后跟数字；个股与指数共用命名空间，v2 契约）
 _EXPLICIT_PREFIX_RE = re.compile(r"^(?:sh|sz|bj)\d", re.IGNORECASE)
+
+
+@contextmanager
+def _runtime_config():
+    """缺省使用 Skill 内部配置，显式 KLINE_CONFIG_PATH 始终优先。"""
+    if os.environ.get("KLINE_CONFIG_PATH") or not os.path.isfile(_BUNDLED_CONFIG):
+        yield
+        return
+
+    os.environ["KLINE_CONFIG_PATH"] = _BUNDLED_CONFIG
+    try:
+        yield
+    finally:
+        if os.environ.get("KLINE_CONFIG_PATH") == _BUNDLED_CONFIG:
+            os.environ.pop("KLINE_CONFIG_PATH", None)
 
 
 def _positive_int(value: str, option: str) -> int:
@@ -580,17 +598,17 @@ def build_parser():
     return parser
 
 
-def main(argv=None):
+def _main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         try:
             args.func(args)
-        except EnvironmentError as e:  # 库层未配置 KLINE_API_BASE_URL 时抛出（含原始指引）
-            emit_error("config", f"行情网关地址未配置（KLINE_API_BASE_URL）: {e}",
-                       actionable='请先 export KLINE_API_BASE_URL="http://<网关地址>"；'
-                                  "若使用 YAML，请通过 KLINE_CONFIG_PATH 指向配置文件的绝对路径后重试")
-        except TZTConnectionError as e:
-            emit_error("network", str(e), actionable="检查网络连通性与 KLINE_API_BASE_URL 后重试")
+        except EnvironmentError:  # 包内配置缺失或管理员显式配置无效
+            emit_error("config", "行情服务配置不可用",
+                       actionable="请联系行情服务管理员检查运行配置")
+        except TZTConnectionError:
+            emit_error("network", "行情服务暂时不可用",
+                       actionable="请联系行情服务管理员检查服务状态")
         except TZTAPIError as e:
             emit_error("gateway", str(e), actionable="检查代码/参数后重试（ErrorNo 见 message）")
         except TZTError as e:
@@ -601,6 +619,11 @@ def main(argv=None):
         return EXIT_OK
     except _ScriptExit as e:  # emit_* 的统一出口（成功/歧义/未找到/错误）
         return e.code
+
+
+def main(argv=None):
+    with _runtime_config():
+        return _main(argv)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+**变更**
+- Release Skill 新增包内默认行情配置，Trae Work/Coze 上传后无需依赖会话环境变量；
+  `KLINE_API_BASE_URL` 与 `KLINE_CONFIG_PATH` 仍可由管理员显式覆盖
+- Skill 指令、CLI 配置/网络错误及传输层日志统一隐藏具体网关地址；网络异常不再透传
+  可能包含完整 URL 的 `requests` 原始错误文本
+- 打包流程强制校验内部配置存在，并拒绝在用户可见的 `SKILL.md` 或 CLI 中残留具体 IP 地址
+
 ## [2.1.0] - 2026-08-27
 
 **新增**

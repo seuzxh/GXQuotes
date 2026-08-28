@@ -145,8 +145,14 @@ class TZTClient:
                 return result
 
             except requests.exceptions.RequestException as e:
-                self.last_error = TZTConnectionError(f"Request error: {e}")
-                self.logger.warning(f"Request error: {e} (attempt {attempt + 1})")
+                # requests 异常常包含完整 URL；面向 Agent/Skill 的错误与日志不得泄漏网关地址。
+                error_type = type(e).__name__
+                self.last_error = TZTConnectionError("行情网关连接失败")
+                self.logger.warning(
+                    "行情网关连接失败（%s，attempt %s）",
+                    error_type,
+                    attempt + 1,
+                )
                 time.sleep(retry_delay * (2 ** attempt))
             except TZTError:
                 raise  # 本方法主动抛出的类型化异常（strict 不可重试 fail-fast）不放行为解析错误
