@@ -11,15 +11,24 @@ description: >
 
 # 行情 Skill（gxquotes）
 
-统一入口 `skill/scripts/quotes.py`：**stdout 输出 JSON**（`ensure_ascii=False, indent=2`），
-日志走 stderr；退出码表达语义（见下方退出码表）。所有请求均为只读 GET。
+统一入口是本 Skill 目录下的 `scripts/quotes.py`：**stdout 输出 JSON**
+（`ensure_ascii=False, indent=2`），日志走 stderr；退出码表达语义（见下方退出码表）。
+所有请求均为只读 GET。
+
+执行前，将当前已加载 Skill 的目录（即本 `SKILL.md` 所在目录）的绝对路径赋给
+`GXQUOTES_SKILL_DIR`。不得根据当前工作目录或用户项目目录推断 Skill 路径。下方示例均假定已执行：
+
+```bash
+GXQUOTES_SKILL_DIR="/absolute/path/to/installed/gxquotes"
+```
 
 ## 环境要求
 
 - 环境变量 `KLINE_API_BASE_URL`（必配，行情网关地址）。未配置时脚本 exit 4，
   `error.message` 附配置指引。配置方式：
   `export KLINE_API_BASE_URL="http://183.242.5.14:7778"`
-  （或写入 `tzt_api/config/kline_config.yaml` 的 `api.base_url`）
+  若改用 YAML 配置文件，请通过 `KLINE_CONFIG_PATH` 指向该文件的绝对路径；不要依赖
+  源码仓库或 Skill 安装目录中的固定配置路径。
 - Coze / GitHub Release 产物以 Python 3.11 为运行时目标，并在 `scripts/vendor/`
   内携带 tzt-api v2.1.0、requests、PyYAML 等全部 Python 依赖，可直接执行；
   tzt-api 库本身支持 Python ≥3.9。在 GXQuotes 仓库内开发时，脚本会优先加载仓库源码。
@@ -36,7 +45,7 @@ description: >
 ### 1. resolve — 标的解析
 
 ```bash
-python skill/scripts/quotes.py resolve 平安银行
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" resolve 平安银行
 ```
 
 exit 0 → `{"data": {"term","status":"unique","chosen":{"code","name","market","label","is_index"},"candidates":[...]}, "meta": {"count": N}}`
@@ -48,7 +57,7 @@ exit 0 → `{"data": {"term","status":"unique","chosen":{"code","name","market",
 ### 2. dayk — 日K线
 
 ```bash
-python skill/scripts/quotes.py dayk sh600519 --count -3 --adjust none
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" dayk sh600519 --count -3 --adjust none
 ```
 
 exit 0 → `{"data": [{"date","open","high","low","close","volume","amount"}], "meta": {"count": 3}}`
@@ -61,7 +70,7 @@ exit 0 → `{"data": [{"date","open","high","low","close","volume","amount"}], "
 ### 3. mink — 分钟K线
 
 ```bash
-python skill/scripts/quotes.py mink sz399001 --freq 5min --count -3
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" mink sz399001 --freq 5min --count -3
 ```
 
 exit 0 → `{"data": [{"date","time","open","high","low","close","volume","amount"}], ...}`（带 `time` 字段）
@@ -71,7 +80,7 @@ exit 0 → `{"data": [{"date","time","open","high","low","close","volume","amoun
 ### 4. trend — 个股分时
 
 ```bash
-python skill/scripts/quotes.py trend sh600519
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" trend sh600519
 ```
 
 exit 0 → `{"data": {"market_date","pre_market":[...],"trading":[{"date","time","last_price","avg_price","volume","turnover"}]}, "meta": {"count": N, "pre_market_count": M}}`
@@ -81,7 +90,7 @@ exit 0 → `{"data": {"market_date","pre_market":[...],"trading":[{"date","time"
 ### 5. plate-list — 板块列表/排行
 
 ```bash
-python skill/scripts/quotes.py plate-list --type concept --sort change_pct --direction desc --limit 30
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" plate-list --type concept --sort change_pct --direction desc --limit 30
 ```
 
 exit 0 → `{"data": [{"code","name","market", "<27个普通标量props字段>"}], "meta": {"count", "market":44, "type", "subtype", "full", "sort", "retrieved_at"}}`
@@ -102,7 +111,7 @@ exit 0 → `{"data": [{"code","name","market", "<27个普通标量props字段>"}
 ### 6. plates — 个股所属板块
 
 ```bash
-python skill/scripts/quotes.py plates sh600519 --type concept
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" plates sh600519 --type concept
 ```
 
 exit 0 → `{"data": [{"code","name","market","type":"concept|industry|region"}], ...}`
@@ -112,7 +121,7 @@ exit 0 → `{"data": [{"code","name","market","type":"concept|industry|region"}]
 ### 7. members — 板块成份股
 
 ```bash
-python skill/scripts/quotes.py members 994612 --sort change_pct --direction desc --limit 30
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" members 994612 --sort change_pct --direction desc --limit 30
 ```
 
 exit 0 → `{"data": [{"code","name","market","price","change","change_pct","high","low","<选中的排序字段>"}], "meta": {"count","plate","full","sort","retrieved_at"}}`
@@ -129,7 +138,7 @@ exit 0 → `{"data": [{"code","name","market","price","change","change_pct","hig
 ### 8. platek — 板块指数K线
 
 ```bash
-python skill/scripts/quotes.py platek 994612 --freq 5min --count -3
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" platek 994612 --freq 5min --count -3
 ```
 
 exit 0 → 分钟K（结构同 mink，带 `time` 字段）。不给 `--freq` 则为日K（结构同 dayk，缺省 -120 根）。
@@ -137,7 +146,7 @@ exit 0 → 分钟K（结构同 mink，带 `time` 字段）。不给 `--freq` 则
 ### 9. platetrend — 板块指数分时
 
 ```bash
-python skill/scripts/quotes.py platetrend 994612
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" platetrend 994612
 ```
 
 exit 0 → 结构同 trend（`market_date/pre_market/trading`）；`--date YYYYMMDD` 取历史。
@@ -145,7 +154,7 @@ exit 0 → 结构同 trend（`market_date/pre_market/trading`）；`--date YYYYM
 ### 10. market-rank — 市场个股排行
 
 ```bash
-python skill/scripts/quotes.py market-rank --scope all-a --sort change_pct --direction desc --limit 50
+python "$GXQUOTES_SKILL_DIR/scripts/quotes.py" market-rank --scope all-a --sort change_pct --direction desc --limit 50
 ```
 
 exit 0 → `{"data": [{"code","symbol","name","market","market_name","<30个普通标量行情字段>"}], "meta": {"count","max","scope","markettype","routemarkets","start","limit","sort","retrieved_at"}}`

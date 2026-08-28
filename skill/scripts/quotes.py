@@ -15,7 +15,7 @@
   platetrend  <板块代码> [--date YYYYMMDD]                板块分时（缺省当日）
   market-rank [--scope ...] [--sort FIELD] [--direction asc|desc] [--limit N]
                                                              京沪深市场个股排行
-依赖：tzt-api v2.1.0（pip install -e 本仓库，或仓库内直跑），KLINE_API_BASE_URL 环境变量。
+依赖：Release Skill 包自带 tzt-api v2.1.0；仓库开发态也可直接运行。需配置 KLINE_API_BASE_URL。
 """
 import argparse
 import json
@@ -428,7 +428,8 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="quotes.py",
         description="行情 Skill 执行入口（gxquotes）：stdout 输出 JSON，退出码 0/2/3/4。",
-        epilog="示例：python skill/scripts/quotes.py dayk sh600519 --count -3 --adjust none")
+        epilog=("示例：python /absolute/path/to/gxquotes/scripts/quotes.py "
+                "dayk sh600519 --count -3 --adjust none"))
     sub = parser.add_subparsers(dest="command", metavar="<子命令>", required=True)
 
     p = sub.add_parser("resolve", help="标的解析：6位代码/中文名/拼音首字母 → 候选与路由结论")
@@ -586,8 +587,8 @@ def main(argv=None):
             args.func(args)
         except EnvironmentError as e:  # 库层未配置 KLINE_API_BASE_URL 时抛出（含原始指引）
             emit_error("config", f"行情网关地址未配置（KLINE_API_BASE_URL）: {e}",
-                       actionable='请先 export KLINE_API_BASE_URL="http://<网关地址>"'
-                                  "（或配置 tzt_api/config/kline_config.yaml 的 api.base_url）后重试")
+                       actionable='请先 export KLINE_API_BASE_URL="http://<网关地址>"；'
+                                  "若使用 YAML，请通过 KLINE_CONFIG_PATH 指向配置文件的绝对路径后重试")
         except TZTConnectionError as e:
             emit_error("network", str(e), actionable="检查网络连通性与 KLINE_API_BASE_URL 后重试")
         except TZTAPIError as e:

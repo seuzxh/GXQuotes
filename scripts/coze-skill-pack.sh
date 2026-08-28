@@ -153,6 +153,15 @@ fi
 
 # 用一个不继承仓库依赖的全新 venv 验证 Release 包确实可独立导入并启动。
 unzip -q "$ARTIFACT" -d "$UNPACKED"
+
+# 发布文档和用户可见帮助不得泄漏源码仓库布局。Skill 可能安装在任意目录，
+# 运行入口必须相对已加载的 SKILL.md 定位，配置文件则通过环境变量显式指定。
+if grep -nE 'skill/scripts/quotes\.py|tzt_api/config/kline_config\.yaml' \
+  "$UNPACKED/SKILL.md" "$UNPACKED/scripts/quotes.py"; then
+  echo "错误：发布物仍包含源码仓库专用路径" >&2
+  exit 1
+fi
+
 python -m venv "$TMP/smoke-venv"
 "$TMP/smoke-venv/bin/python" -I "$UNPACKED/scripts/quotes.py" --help >/dev/null
 
