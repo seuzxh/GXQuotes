@@ -25,7 +25,7 @@
 
 接口信息（Action 功能号、入出参、属性 ID、字段单位、市场代码）优先读 [docs/API/中焯官方文档/README.md](docs/API/中焯官方文档/README.md)（6 份解析版 + originals/，含「查什么→读哪份」导航）；接口总览见 [docs/API/接口功能清单.md](docs/API/接口功能清单.md)，概念板块详见 [docs/API/concept_plate_api.md](docs/API/concept_plate_api.md)，项目需求见 [docs/requirements/行情Skill需求.md](docs/requirements/行情Skill需求.md)。
 
-**派发规则**：中焯接口需求（新建/校验/解析问题）必须调用子智能体 `tztapi-agent`（ZCode：Skill `tztapi-agent`；Claude Code：subagent）。其准则：结论以官方文档为据、以真实 API 实测定论。
+**开发入口**：中焯接口需求（新建、校验或解析）先读[接口开发指南](docs/guide/tztapi-agent.md)。如果当前环境已配置 `tztapi-agent`，可用它协助查文档、验证请求；未安装或无法访问私有仓库时（包括 Codex），直接按本仓指南执行，不必安装额外 Skill。用本仓官方资料核对接口契约；没有已授权行情环境时可完成封装和 mock 测试，但须标注未实测。`gxquotes` Skill 用于调用已有接口，不是开发前置依赖。
 
 ## 当前状态
 
