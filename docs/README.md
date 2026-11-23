@@ -21,7 +21,7 @@
 
 ## guide/ — 使用指南
 
-- [tztapi-agent.md](guide/tztapi-agent.md) —— 中焯接口智能体使用指南（新建/校验/咨询三类场景与铁律）
+- [tztapi-agent.md](guide/tztapi-agent.md) —— 中焯行情接口开发指南（仓库内即可查文档、封装和测试；说明如何选用独立 tztapi-agent）
 
 ## skill/ — 行情 Skill 交付（仓库根，v2.1.0）
 

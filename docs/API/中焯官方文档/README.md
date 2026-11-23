@@ -35,9 +35,9 @@
 
 | Action | 接口 | 项目实现 |
 |---|---|---|
-| 10000 | 通用属性（基础数据-多股票） | `get_stock_concept_plates`（关联属性 900/901/923）、`get_stock_info` |
+| 10000 | 通用属性（基础数据-多股票） | `get_stock_concept_plates`（关联属性 900/901/923） |
 | 10001 | 分时（trendtypes=-1 全时段） | `TrendFetcher`（CallTrend=46 集合竞价 / TrendOp=43 盘中 / 421~423 盘口） |
-| 10002 | K线（klinetype=属性 ID） | `fetch_day_kline` / `fetch_min_kline` / `get_concept_plate_kline` |
+| 10002 | K线（klinetype=属性 ID） | `fetch_day_kline` / `fetch_min_kline` / `get_concept_plate_kline` / `get_stock_info` |
 | 10005 | 板块菜单（block.include 含板块指数时放首位） | `get_concept_plate_stocks` |
 | 10006 | 市场个股排行（markettype 证券池 + routemarkets 路由） | `MarketRankFetcher.get_market_rank` |
 | 10007 | 板块指数排行（subtype 0/1/2/3=行业/概念/地域/风格） | `get_all_plates` / `get_all_concept_plates` |
@@ -54,7 +54,7 @@
 | 2 | 金额 | ×10,000（4 位小数） | `÷1e4 → 元` |
 | 3 | 量 | 不放大，单位「股」 | 直通 |
 | 4 | 比例 | ×1,000 | — |
-| 5 | 百分比 | ×100,000 | 概念板块 `change_pct` 等原始字段未换算，用前 ÷1e5 |
+| 5 | 百分比 | ×100,000 | 协议原始值 ÷1e5 得小数比例；GXQuotes 已用 ÷1e3 输出百分数值，例如 `3297` → `3.297`（表示 `3.297%`），包括概念板块 `change_pct`，调用方不要再除一次 |
 
 **常用市场序号**：0=深证、1=上证、44=沪深板块指数（概念板块固定值）、103=北证。
 
